@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: property_valuation_api_prod
+    restart: always
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env.production
+    depends_on:
+      - db
+    environment:
+      - TZ=Asia/Phnom_Penh
+
+  db:
+    image: postgres:15-alpine
+    container_name: property_valuation_db_prod
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

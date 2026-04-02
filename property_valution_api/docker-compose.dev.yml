@@ -1,0 +1,58 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: property_valuation_api_dev
+    ports:
+      - "4000:4000"
+      - "5555:5555"
+    env_file:
+      - .env.development
+    depends_on:
+      - db
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: sh -c "npm install && npx prisma generate && npm run dev"
+    environment:
+      - TZ=Asia/Phnom_Penh
+      - CHOKIDAR_USEPOLLING=true
+
+  db:
+    image: postgis/postgis:15-3.3
+    container_name: property_valuation_db_dev
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    # The database also loads everything it needs from the same file.
+    env_file:
+      - .env.development
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-postgis.sql:/docker-entrypoint-initdb.d/init-postgis.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: property_valuation_pgadmin_dev
+    restart: unless-stopped
+    ports:
+      - "5050:80"
+    env_file:
+      - .env.development
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_DEFAULT_PASSWORD:-admin}
+    depends_on:
+      - db
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+volumes:
+  postgres_data:
+  pgadmin_data:

@@ -1,0 +1,1470 @@
+// prisma/schema.prisma
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+enum AccountStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  DISABLED
+}
+
+
+enum ActionType {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  EXECUTE
+  MANAGE
+}
+
+enum PropertyStatus {
+  SOLD
+  RENTED
+  RENTAL_SALE
+  ACTIVE
+  INACTIVE
+}
+
+enum PropertyValuationStatus {
+  ACTIVE
+  SUPERSEDED
+  EXPIRED
+  CANCELLED
+}
+enum PropertyIndicativeValuationStatus {
+  ACTIVE
+  SUPERSEDED
+  EXPIRED
+  CANCELLED
+}
+
+enum WorkflowStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  ARCHIVED
+}
+
+enum TitleTypeEnum {
+  HARD
+  SOFT
+  LMAP
+  STRATA
+}
+
+enum SourceTypeEnum {
+  OWNERSHIP
+  AGENCY
+  AUTHORITY
+  BANK
+  OTHER
+}
+
+enum LandShapeEnum {
+  RECTANGLE
+  SQUARE
+  TRIANGLE
+  IRREGULAR
+  SHAPE
+}
+
+enum TopographyEnum {
+  LEVEL
+  SLOPED
+  FILLED
+  UNLEVEL
+  UNFILLED
+  NONE
+}
+
+enum SitePositionEnum {
+  INTERMEDIATE
+  CORNER
+  END
+  MAIN_ROAD
+  SUB_ROAD
+}
+
+enum TypeOfTreeEnum {  
+  MANGO
+  COCONUT
+  BANANA
+  RUBBER
+  CASHEW
+  PALM
+  PEPPER
+  LONGAN
+  RAMBUTAN
+  JACKFRUIT
+  OTHER
+}
+
+enum WaterSourceEnum {
+  CITY_WATER
+  WELL_WATER
+  RIVER_ACCESS
+  POND
+  NONE
+}
+
+enum Physical_condition {
+  POOR
+  FAIR
+  GOOD
+  EXCELLENT
+}
+
+enum ViewType {
+  CITY_VIEW
+  PARK_VIEW
+  RIVER_VIEW
+  SEA_VIEW
+  MOUNTAIN_VIEW
+  NO_VIEW
+}
+
+
+enum ConstructionStatus {
+  EXISTING_CONSTRUCTION
+  UNDER_CONSTRUCTION
+  COMPLETED
+}
+
+enum ValuationMethod {
+  SALES_COMPARISON_APPROACH
+  INCOME_APPROACH
+  COST_APPROACH
+  SALES_AND_COST_APPROACH
+}
+
+
+
+enum TransactionType {
+  SALE
+  RENTAL
+  SOLD
+  RENTED
+  SALE_RENTAL
+  CANCELED_TRANSACTION
+}
+
+enum UnitType {
+  STUDIO
+  ONE_BEDROOM
+  TWO_BEDROOM
+  THREE_BEDROOM
+  PENTHOUSE
+  DUPLEX
+  APARTMENT
+  OFFICE
+  RETAIL
+  SHOWROOM
+  MIXED_USE
+  WAREHOUSE
+  FACTORY
+  STORAGE
+}
+
+
+enum ReportTypeEnum {
+  VALUATION
+  PROPERTY_LISTING
+  AUDIT_LOG
+  USER_ACTIVITY
+}
+
+enum ComparableStatus {
+  ACTIVE
+  INACTIVE
+  VERIFIED
+  PENDING
+}
+
+enum AdjustmentType {
+  LOCATION
+  SIZE
+  CONDITION
+  AMENITIES
+  TIME
+  OTHER
+}
+
+enum NotificationType {
+  PROPERTY_SUBMITTED
+  PROPERTY_APPROVED
+  PROPERTY_REJECTED
+  VALUATION_SUBMITTED
+  VALUATION_APPROVED
+  VALUATION_REJECTED
+  INDICATIVE_VALUATION_SUBMITTED
+  INDICATIVE_VALUATION_APPROVED
+  INDICATIVE_VALUATION_REJECTED
+  SYSTEM_ANNOUNCEMENT
+}
+
+enum IndicativeComponentType {
+  LAND
+  BUILDING
+  OTHER
+}
+
+// User Management models
+model User {
+  id                  Int           @id @default(autoincrement())
+  username            String        @unique @db.VarChar(50)
+  email               String        @unique @db.VarChar(100)
+  password            String?        @db.VarChar(255)
+  firstName           String        @db.VarChar(50)
+  lastName            String        @db.VarChar(50)
+  phone               String?       @db.VarChar(20)
+  profilePicture      String?       @db.VarChar(255)
+  bio                 String?       @db.Text
+  status              AccountStatus @default(PENDING)
+
+  // Email verification 
+  emailVerified       DateTime?
+  emailVerifyTokenHash String? 
+  emailVerifyExpiresAt DateTime?  
+
+  //login security
+  failedLoginAttempts Int           @default(0)
+  accountLockedUntil  DateTime?
+  lastLogin           DateTime?
+
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  // Relations
+  accounts            Account[]
+  tokens              RefreshToken[]
+  roles               UserRole[]
+  auditLogs           AuditLog[]
+  preferences         UserPreference?
+  assignedPermissions RolePermission[]    @relation("AssignedByAdmin")
+  
+ // --- Property Management Relations ---
+  // Tracks properties this user has touched
+  createdProperties    Property[]      @relation("CreatedByUser")
+  updatedProperties    Property[]      @relation("UpdatedByUser")
+  approvedProperties   Property[]      @relation("ApproverUser")
+  rejectedProperties   Property[]      @relation("RejecterUser") 
+  
+  // --- Valuation Governance Relations ---
+  // Cleaned up to match your latest PropertyValuation schema
+  valuationsCreated    PropertyValuation[] @relation("CreatedByUser")   // The person who started the draft
+  valuationsUpdated    PropertyValuation[] @relation("UpdatedByUser")   // The last person to edit
+  valuationsAsValuer   PropertyValuation[] @relation("ValuerUser")      // The assigned Appraiser
+  valuationsApproved   PropertyValuation[] @relation("ApproverUser")    // The Manager who approved
+  valuationsRejected   PropertyValuation[] @relation("RejecterUser")    // The Manager who rejected
+  indicativeValuationsAsValuer   PropertyIndicativeValuation[] @relation("IndicativeValuer")
+  indicativeValuationsApproved   PropertyIndicativeValuation[] @relation("IndicativeApprover")
+  indicativeValuationsRejected   PropertyIndicativeValuation[] @relation("IndicativeRejecter")
+  indicativeValuationsCreated    PropertyIndicativeValuation[] @relation("IndicativeCreatedBy")
+  indicativeValuationsUpdated    PropertyIndicativeValuation[] @relation("IndicativeUpdatedBy")
+  
+  generatedReport     GeneratedReport[]   @relation("generatedByUser")
+  createdComparable   Comparable[]        @relation("createdByUser")
+  verifiedComparable  Comparable[]        @relation("VerifiedByUser")
+  reportsGenerated    GeneratedReport[]   @relation("ReportUser")
+  uploadedValuationDocuments ValuationDocument[] @relation("ValuationDocumentUploader")
+  notifications        Notification[]   @relation("NotificationRecipient")
+  createdNotifications Notification[]   @relation("NotificationCreatedBy")
+                                                 
+
+  @@map("users")
+}
+
+model UserPreference {
+  id              Int      @id @default(autoincrement())
+  userId          Int      @unique
+  theme           String   @default("light") @db.VarChar(20)
+  language        String   @default("en") @db.VarChar(10)
+  timezone        String   @default("Asia/Phnom_Penh") @db.VarChar(50)
+  accentColor     String?   @default("blue") @db.VarChar(20)
+  borderRadius    String?  @default("medium") @db.VarChar(20)
+  fontFamily      String?  @default("inter") @db.VarChar(50)
+  fontSize        String?  @default("medium") @db.VarChar(20)
+  themeColor      String?  @default("default") @db.VarChar(20)
+  themePreset     String?   @default("default") @db.VarChar(50)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+model Account{
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  type           String   @db.VarChar(50)
+  provider       String   @db.VarChar(50)
+  providerAccountId String @db.VarChar(100)
+  refresh_token   String?  @db.Text
+  access_token    String?  @db.Text
+  expires_at      Int?
+  token_type     String?  @db.VarChar(50)
+  scope          String?  @db.Text
+  id_token      String?  @db.Text
+  session_state  String?  @db.Text
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+
+
+model UserRole {
+  userId     Int
+  roleId     Int
+  assignedAt DateTime @default(now())
+  assignedBy Int
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model Role {
+  id             Int      @id @default(autoincrement())
+  roleName       String   @unique @db.VarChar(50)
+  roleCode       String   @unique @db.VarChar(20)
+  description    String?
+  hierarchyLevel Int
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model RolePermission {
+  roleId       Int
+  permissionId Int
+  assignedAt   DateTime @default(now())
+  assignedBy   Int
+
+  role           Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission     Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  assignedByUser User       @relation("AssignedByAdmin", fields: [assignedBy], references: [id], onDelete: NoAction)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model Permission {
+  id             Int        @id @default(autoincrement())
+  permissionName String     @db.VarChar(50)
+  permissionCode String     @unique @db.VarChar(50)
+  resource       String     @db.VarChar(50)
+  action         ActionType
+  description    String?    @db.Text
+  isActive       Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RefreshToken {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  token      String    @unique @db.VarChar(255)
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+
+  replacedByToken String?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?     @map("user_id")
+  action    String
+  entity    String?  
+  entityId  Int?     @map("entity_id")
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  details   Json?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
+
+
+
+// Property Management models
+model Property {
+  propertyId        Int            @id @default(autoincrement()) @map("property_id")
+  propertyTypeId    Int            @map("property_type_id")
+  propertySubtypeId Int?           @map("property_subtype_id")
+  currentUseId      Int?           @map("current_use_id")
+  propertyCode      String         @unique @map("property_code") @db.VarChar(50)
+  propertyName      String         @map("property_name") @db.VarChar(255)
+  description       String?        @db.Text
+  status            PropertyStatus @default(ACTIVE)
+  workflowStatus    WorkflowStatus @default(DRAFT)
+  
+  createdBy         Int?           @map("created_by")
+  updatedBy         Int?           @map("updated_by")
+  approvedBy        Int?           @map("approved_by")
+  rejectedBy        Int?           @map("rejected_by")
+  rejectionReason   String?        @db.Text @map("rejection_reason")
+  
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  propertyType    PropertyType     @relation(fields: [propertyTypeId], references: [propertyTypeId])
+  currentUse      CurrentUse?      @relation(fields: [currentUseId], references: [useId])
+  propertySubtype PropertySubtype? @relation(fields: [propertySubtypeId], references: [propertySubtypeId])
+  approved   User? @relation("ApproverUser", fields: [approvedBy], references: [id])
+  rejected   User? @relation("RejecterUser", fields: [rejectedBy], references: [id])
+  createdByUser   User?            @relation("CreatedByUser", fields: [createdBy], references: [id])
+  updatedByUser   User?            @relation("UpdatedByUser", fields: [updatedBy], references: [id])
+  propertyAddress   PropertyAddress?
+  propertyLocation  PropertyLocation?
+  titleDocument     TitleDocument?
+  dataSource        DataSource?
+  land              Land?
+  agricultureLand   AgricultureLand?
+  building          Building[]
+  buildingUnits     BuildingUnit[]
+  propertyPhotos    PropertyPhoto?
+  propertyValuation PropertyValuation[]
+  propertyIndicativeValuations PropertyIndicativeValuation[]
+  transaction       Transaction[]
+  comparable        Comparable[]
+
+  @@index([propertyTypeId])
+  @@index([status])
+  @@index([createdBy])
+  @@map("properties")
+}
+
+model RecordType {
+  recordTypeId Int      @id @default(autoincrement()) @map("record_type_id")
+  recordName   String   @map("record_name") @db.VarChar(50)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  propertyTypes PropertyType[]
+
+  @@map("record_types")
+}
+
+model PropertyType {
+  propertyTypeId Int      @id @default(autoincrement()) @map("property_type_id")
+  recordTypeId   Int?     @map("record_type_id")
+  propertyName   String   @map("property_name") @db.VarChar(50)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  recordType       RecordType?              @relation(fields: [recordTypeId], references: [recordTypeId])
+  subtypes         PropertySubtype[]
+  properties       Property[]
+  currentUses      PropertyTypeCurrentUse[]
+  buildingSubtypes BuildingSubtype[]
+  buildingUnits    BuildingUnit[]
+  Comparable       Comparable[]
+
+  @@index([recordTypeId])
+  @@map("property_types")
+}
+
+model PropertySubtype {
+  propertySubtypeId Int      @id @default(autoincrement()) @map("property_subtype_id")
+  propertyTypeId    Int      @map("property_type_id")
+  subtypeName       String   @map("subtype_name") @db.VarChar(100)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  propertyType PropertyType @relation(fields: [propertyTypeId], references: [propertyTypeId])
+  properties   Property[]
+  Comparable   Comparable[]
+
+  @@index([propertyTypeId])
+  @@map("property_subtypes")
+}
+
+model BuildingSubtype {
+  buildingSubtypeId Int      @id @default(autoincrement()) @map("building_subtype_id")
+  propertyTypeId    Int?     @map("property_type_id")
+  subtypeName       String   @map("subtype_name") @db.VarChar(100)
+  description       String?  @db.Text
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  propertyType PropertyType? @relation(fields: [propertyTypeId], references: [propertyTypeId])
+  buildings    Building[]
+
+  @@index([propertyTypeId])
+  @@map("building_subtypes")
+}
+
+model CurrentUse {
+  useId     Int      @id @default(autoincrement()) @map("use_id")
+  useName   String   @map("use_name") @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  propertyTypes PropertyTypeCurrentUse[]
+  properties    Property[]
+
+  @@map("current_uses")
+}
+
+model PropertyTypeCurrentUse {
+  propertyTypeId Int @map("property_type_id")
+  useId          Int @map("use_id")
+
+  propertyType PropertyType @relation(fields: [propertyTypeId], references: [propertyTypeId], onDelete: Cascade)
+  currentUse   CurrentUse   @relation(fields: [useId], references: [useId], onDelete: Cascade)
+
+  @@id([propertyTypeId, useId])
+  @@map("property_type_current_uses")
+}
+
+// Property Details and Owership
+
+model TitleDocument {
+  titleId              Int           @id @default(autoincrement()) @map("title_id")
+  propertyId           Int           @unique @map("property_id")
+  titleDeedType        TitleTypeEnum @map("title_deed_type")
+  titleDeedNo          String?       @unique @map("title_deed_no") @db.VarChar(100)
+  issuedYear           String?       @map("issued_year") @db.VarChar(50)
+  parcelNo             String?       @map("parcel_no") @db.VarChar(100)
+  totalSizeByTitleDeed Decimal?      @map("total_size_by_title_deed") @db.Decimal(12, 2)
+  stampDate            DateTime?     @map("stamp_date") @db.Date
+  coverPhotoUrl        String?       @map("cover_photo_url") @db.VarChar(500)
+  backSidePhotoUrl     String?       @map("back_side_photo_url") @db.VarChar(500)
+  otherPhotoUrl        String?       @map("other_photo_url") @db.VarChar(500)
+  createdAt            DateTime      @default(now()) @map("created_at")
+  updatedAt            DateTime      @updatedAt @map("updated_at")
+
+  property Property @relation(fields: [propertyId], references: [propertyId], onDelete: Cascade)
+
+  @@map("title_documents")
+}
+
+model DataSource {
+  dataSourceId Int            @id @default(autoincrement()) @map("data_source_id")
+  propertyId   Int            @unique @map("property_id")
+  sourceType   SourceTypeEnum @map("source_type")
+  contactName  String?        @map("contact_name") @db.VarChar(255)
+  phoneNumber  String?        @map("phone_number") @db.VarChar(50)
+  createdBy    Int            @map("created_by")
+  updateBy     Int?           @map("update_by")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  property Property @relation(fields: [propertyId], references: [propertyId], onDelete: Cascade)
+
+  @@map("data_sources")
+}
+
+model PropertyPhoto {
+  propertyId Int      @map("property_id")
+  frontSide  String?  @map("front_side") @db.VarChar(255)
+  inside     String?  @db.VarChar(255)
+  leftSide   String?  @map("left_side") @db.VarChar(255)
+  rightSide  String?  @map("right_side") @db.VarChar(255)
+  opposite   String?  @db.VarChar(255)
+  gallery    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  property Property @relation(fields: [propertyId], references: [propertyId], onDelete: Cascade)
+
+  @@id([propertyId])
+  @@map("property_photos")
+}
+
+// Land Details
+
+model Land {
+  landId       Int               @id @default(autoincrement()) @map("land_id")
+  propertyId   Int               @unique @map("property_id")
+  widthMeters  Decimal?          @map("width_meters") @db.Decimal(10, 2)
+  lengthMeters Decimal?          @map("length_meters") @db.Decimal(10, 2)
+  landAreaSqm  Decimal?          @map("land_area_sqm") @db.Decimal(12, 2)
+  landShape    LandShapeEnum?
+  topography   TopographyEnum?
+  sitePosition SitePositionEnum?
+  waterSource  WaterSourceEnum?
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  property Property @relation(fields: [propertyId], references: [propertyId], onDelete: Cascade)
+
+  @@map("lands")
+}
+
+model AgricultureLand {
+  agriLandId    Int             @id @default(autoincrement()) @map("agri_land_id")
+  propertyId    Int             @unique @map("property_id")
+  typeofTree    TypeOfTreeEnum?
+  numberOfTrees Int?            @map("number_of_trees")
+  ageOfTrees    Int?            @map("age_of_trees")
+  pricePerTree  Decimal?        @map("price_per_tree") @db.Decimal(15, 2)
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  property Property @relation(fields: [propertyId], references: [propertyId], onDelete: Cascade)
+
+  @@map("agriculture_lands")
+}
+
+// Building details
+
+model Building {
+  buildingId        Int      @id @default(autoincrement()) @map("building_id")
+  propertyId        Int      @map("property_id")
+  buildingSubtypeId Int      @map("building_subtype_id")
+  buildingName      String?  @map("building_name") @db.VarChar(255)
+  width             Decimal? @db.Decimal(10, 2)
+  length            Decimal? @db.Decimal(10, 2)
+  numberOfStorey    Int?     @map("number_of_storeys")
+  grossAreaSqm      Decimal? @map("gross_area_sqm") @db.Decimal(12, 2)
+
+  bedroom      Int? @map("bedroom")
+  bathroom     Int? @map("bathroom")
+  livingroom   Int? @map("living_room")
+  kitchen      Int? @map("kitchen")
+  diningroom   Int? @map("dining_room")
+  totalRoom    Int? @map("total_room")
+  parkingSpace Int? @map("parking_space")
+
+  constructionYear         Int?                      @map("construction_year")
+  percentageOfConstruction Int?                    @map("percentage_of_construction")
+  effectiveAge             Int?                      @map("effective_age")
+  usefulLife               Int?                      @default(50) @map("useful_life")
+  costPerSqm               Decimal?                  @map("cost_per_sqm") @db.Decimal(15, 2)
+  replacementCostPerSqm    Decimal?                  @map("replacement_cost_per_sqm") @db.Decimal(15, 2)
+  totalBuildingCost        Decimal?                  @map("total_cost_estimation") @db.Decimal(15, 2)
+
+  buildingImage String?   @map("image_url") @db.VarChar(500)
+  viewType      ViewType?
+
+  totalUnits Int?                @map("total_units")
+  status     ConstructionStatus?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  property        Property        @relation(fields: [propertyId], references: [propertyId], onDelete: Cascade)
+  buildingSubtype BuildingSubtype @relation(fields: [buildingSubtypeId], references: [buildingSubtypeId])
+  buildingUnits   BuildingUnit[]
+
+  @@index([propertyId])
+  @@index([buildingSubtypeId])
+  @@map("building")
+}
+
+model BuildingUnit {
+  buildingUnitId Int  @id @default(autoincrement()) @map("building_unit_id")
+  buildingId     Int? @map("building_id")
+  propertyId     Int  @map("property_id")
+  propertyTypeId Int? @map("property_type_id")
+
+  unitNo  String? @map("unit_no") @db.VarChar(50)
+  unitType UnitType?
+  floorNo Int?    @map("floor_no")
+
+  floorAreaSqm Decimal? @map("floor_area_sqm") @db.Decimal(12, 2)
+  totalAreaSqm Decimal? @map("total_area_sqm") @db.Decimal(12, 2)
+
+  numberOfBedrooms  Int?     @map("number_of_bedrooms")
+  numberOfBathrooms Int?     @map("number_of_bathrooms")
+  hasKitchen        Boolean? @default(true) @map("has_kitchen")
+  hasLivingRoom     Boolean? @default(true) @map("has_living_room")
+
+  hasParkingSpace Boolean? @default(true) @map("has_parking_space")
+
+  physical_condition Physical_condition?
+  managementFeeValue   Float?   @map("management_fee_value")
+  viewType           ViewType?
+
+  constructedYear       Int?     @map("constructed_year")
+  effectiveAge          Int?     @map("effective_age")
+  usefulLife            Int?     @default(50) @map("useful_life")
+  costPerSqm            Decimal? @map("cost_per_sqm") @db.Decimal(15, 2)
+  replacementCostPerSqm Decimal? @map("replacement_cost_per_sqm") @db.Decimal(15, 2)
+  totalBuildingCost     Decimal? @map("total_cost_estimation") @db.Decimal(15, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  property     Property      @relation(fields: [propertyId], references: [propertyId], onDelete: Cascade)
+  propertyType PropertyType? @relation(fields: [propertyTypeId], references: [propertyTypeId])
+  Building     Building?     @relation(fields: [buildingId], references: [buildingId])
+
+  @@index([buildingId])
+  @@index([propertyId])
+  @@index([propertyTypeId])
+  @@map("building_units")
+}
+
+
+// Comparable property 
+
+model Comparable {
+  comparableId Int  @id @default(autoincrement()) @map("comparable_id")
+  propertyId   Int? @map("property_id")
+
+  // Basic Information
+  address         String  @map("address") @db.VarChar(255)
+  propertyType    String  @map("property_type_id")
+  propertySubtype String? @map("property_subtype_id")
+
+  // Land and Building Area
+  landAreaSqm     Decimal? @map("land_area_sqm") @db.Decimal(12, 2)
+  buildingAreaSqm Decimal? @map("building_area_sqm") @db.Decimal(12, 2)
+
+  // Transaction Details
+  salePrice       Decimal?         @map("sale_price") @db.Decimal(15, 2)
+  saleDate        DateTime?        @map("sale_date")
+  transactionType TransactionType? @map("transaction_type")
+
+  // Price Per Unit
+  pricePerSqmLand     Decimal? @map("price_per_sqm_land") @db.Decimal(15, 2)
+  pricePerSqmBuilding Decimal? @map("price_per_sqm_building") @db.Decimal(15, 2)
+
+  // Property Characteristics
+  yearBuilt       Int?    @map("year_built")
+  numberOfStoreys Int?    @map("number_of_storeys")
+  numberOfRooms   Int?    @map("number_of_rooms")
+  numberOfBaths   Int?    @map("number_of_baths")
+  condition       String? @map("condition") @db.VarChar(100)
+
+  // Location Data 
+
+  provinceId      Int?     @map("province_id")
+  districtId      Int?     @map("district_id")
+  communeId       Int?     @map("commune_id")
+  villageName     String?  @map("village_name") @db.VarChar(100)
+  latitude        Decimal? @map("latitude") @db.Decimal(10, 7)
+  longitude       Decimal? @map("longitude") @db.Decimal(10, 7)
+  geolocationLink String?  @map("geolocation_link") @db.VarChar(500)
+
+  // Data Quality & Verification
+  status     ComparableStatus @default(PENDING)
+  dataSource String?          @map("data_source") @db.VarChar(100)
+  verifiedBy Int?             @map("verified_by")
+  verifiedAt DateTime?        @map("verified_at")
+
+  // Additional Information
+  amenities         Json?
+  features          Json?
+  markertConditions Json?
+
+  // notes 
+  notes String? @db.Text
+
+  createdBy Int?     @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  property                         Property?              @relation(fields: [propertyId], references: [propertyId])
+  createdByUser                    User?                  @relation("createdByUser", fields: [createdBy], references: [id])
+  verifiedByUser                   User?                  @relation("VerifiedByUser", fields: [verifiedBy], references: [id])
+  adjustments                      ComparableAdjustment[]
+  valuationComparables             ValuationComparable[]
+  PropertyType                     PropertyType?          @relation(fields: [propertyTypePropertyTypeId], references: [propertyTypeId])
+  propertyTypePropertyTypeId       Int?
+  PropertySubtype                  PropertySubtype?       @relation(fields: [propertySubtypePropertySubtypeId], references: [propertySubtypeId])
+  propertySubtypePropertySubtypeId Int?
+
+  @@index([status])
+  @@index([verifiedBy])
+  @@map("comparables")
+}
+
+model ValuationComparable {
+  id           Int @id @default(autoincrement())
+  valuationId  Int @map("valuation_id")
+  comparableId Int @map("comparable_id")
+
+  // Selection Rationale
+  selectionReason String? @map("selection_reason") @db.Text
+  weight          Decimal @default(1.0) @db.Decimal(3, 2)
+
+  // Adjusted Values
+  adjustedPrice          Decimal @map("adjusted_price") @db.Decimal(15, 2)
+  totalAdjustment        Decimal @map("total_adjustment") @db.Decimal(15, 2)
+  totalAdjustmentPercent Decimal @map("total_adjustment_percent") @db.Decimal(5, 2)
+
+  // Distance & Similarity
+  distanceKm      Decimal? @map("distance_km") @db.Decimal(8, 2)
+  similarityScore Decimal? @map("similarity_score") @db.Decimal(5, 2)
+
+  // Ranking
+  rank Int?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  valuation                                 PropertyValuation         @relation(fields: [valuationId], references: [valuationId], onDelete: Cascade)
+  comparable                                Comparable                @relation(fields: [comparableId], references: [comparableId])
+  adjustments                               ComparableAdjustment[]
+  SalesComparisonValuation                  SalesComparisonValuation? @relation(fields: [salesComparisonValuationSalesComparisonId], references: [salesComparisonId])
+  salesComparisonValuationSalesComparisonId Int?
+
+  @@unique([valuationId, comparableId])
+  @@index([valuationId])
+  @@index([comparableId])
+  @@map("valuation_comparables")
+}
+
+model ComparableAdjustment {
+  adjustmentId          Int  @id @default(autoincrement()) @map("adjustment_id")
+  valuationComparableId Int? @map("valuation_comparable_id")
+  comparableId          Int  @map("comparable_id")
+
+  // Adjustment Details
+  adjustmentType    AdjustmentType @map("adjustment_type")
+  adjustmentFactor  String         @map("adjustment_factor") @db.VarChar(100)
+  adjustmentAmount  Decimal        @map("adjustment_amount") @db.Decimal(15, 2)
+  adjustmentPercent Decimal        @map("adjustment_percent") @db.Decimal(5, 2)
+
+  // Subject vs Comparable
+  subjectValue    String? @map("subject_value") @db.VarChar(255)
+  comparableValue String? @map("comparable_value") @db.VarChar(255)
+
+  // Justification
+  reasoning   String? @db.Text
+  methodology String? @db.VarChar(255)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  valuationComparable ValuationComparable? @relation(fields: [valuationComparableId], references: [id], onDelete: Cascade)
+  comparable          Comparable           @relation(fields: [comparableId], references: [comparableId])
+
+  @@index([valuationComparableId])
+  @@index([comparableId])
+  @@index([adjustmentType])
+  @@map("comparable_adjustments")
+}
+
+// ===========================
+// Valuation and Transaction
+//============================
+model PropertyValuation {
+  valuationId Int @id @default(autoincrement()) @map("valuation_id")
+
+  propertyId  Int @map("property_id")
+
+  valuationNo     String @unique @map("valuation_no") @db.VarChar(50)
+  landValue       Decimal? @map("land_value")        @db.Decimal(18, 2)
+  buildingValue   Decimal? @map("building_value")    @db.Decimal(18, 2)
+  marketValue     Decimal? @map("market_value")      @db.Decimal(18, 2)
+  forcedSaleValue Decimal? @map("forced_sale_value") @db.Decimal(18, 2)
+  pricePerSqm     Decimal? @map("price_per_sqm")     @db.Decimal(18, 2)
+  currency String @default("USD") @db.VarChar(3)
+  preparedFor     String?  @map("prepared_for") @db.VarChar(255)
+
+  // Valuation Metadata
+  dateOfInspection DateTime?       @map("date_of_inspection")
+  valuationDate    DateTime        @default(now()) @map("valuation_date")
+  valuationMethod  ValuationMethod @default(SALES_COMPARISON_APPROACH) @map("valuation_method")
+  expiryDate       DateTime?       @map("expiry_date")
+  dateOfReport     DateTime?       @map("date_of_report")
+
+  
+  // Valuer information
+  valuerId        Int?    @map("valuer_id")
+  inspectorName   String? @map("inspector_name") @db.VarChar(100)
+
+  status          PropertyValuationStatus @default(ACTIVE)
+  workflowStatus  WorkflowStatus @default(DRAFT)
+
+  createdBy       Int?            @map("created_by")
+  updatedBy       Int?            @map("updated_by")
+  approvedBy    Int?            @map("approved_by")
+  rejectedBy    Int?            @map("rejected_by")
+  rejectionReason String?         @map("rejection_reason") @db.Text
+
+  purposeOfValuation String? @map("purpose_of_valuation") @db.Text
+  note              String? @db.Text
+  internalNotes     String? @map("internal_notes") @db.Text
+
+  latestVersion  Int? @map("latest_version")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  property Property @relation(fields: [propertyId], references: [propertyId], onDelete: Restrict)
+  lastestDocument ValuationDocument? @relation("LatestValuationDocument", fields: [valuationId, latestVersion], references: [valuationId, version])
+  valuer     User? @relation("ValuerUser", fields: [valuerId], references: [id])
+  approved   User? @relation("ApproverUser", fields: [approvedBy], references: [id])
+  rejected   User? @relation("RejecterUser", fields: [rejectedBy], references: [id])
+  createdByUser   User?            @relation("CreatedByUser", fields: [createdBy], references: [id])
+  updatedByUser   User?            @relation("UpdatedByUser", fields: [updatedBy], references: [id])
+  // Your existing relations
+  transactions             Transaction[]
+  salesComparisonValuation SalesComparisonValuation?
+  incomeApproachValuation  IncomeApproachValuation?
+  costApproachValuation    CostApproachValuation?
+  ValuationComparable      ValuationComparable[]
+
+  documents ValuationDocument[] @relation("ValuationDocuments")
+
+  @@index([propertyId])
+  @@index([valuationDate])
+  @@index([status])
+  @@index([valuerId])
+  @@index([approvedBy])
+  @@index([valuationMethod])
+  @@unique([valuationId, latestVersion])
+  @@map("property_valuations")
+}
+
+model ValuationDocument {
+  fileId Int @id @default(autoincrement()) @map("file_id")
+
+  valuationId Int @map("valuation_id")
+  version     Int @map("version")
+
+  fileName   String @map("file_name") @db.VarChar(255)
+  mimeType   String @default("application/pdf") @map("mime_type") @db.VarChar(100)
+  fileSize   Int    @map("file_size")
+  storageKey String @map("storage_key") @db.VarChar(500)
+
+  uploadedById Int?     @map("uploaded_by")
+  uploadedAt   DateTime @default(now()) @map("uploaded_at")
+
+  // Relations
+  valuation  PropertyValuation @relation("ValuationDocuments", fields: [valuationId], references: [valuationId], onDelete: Cascade)
+  uploadedBy User?            @relation("ValuationDocumentUploader", fields: [uploadedById], references: [id])
+
+  latestOf PropertyValuation? @relation("LatestValuationDocument")
+
+  @@unique([valuationId, version])
+
+  @@index([valuationId])
+  @@index([uploadedById])
+  @@index([valuationId, uploadedAt])
+  @@map("valuation_documents")
+}
+
+// ===========================
+// Property Indicative Valuation (for quick estimates and workflows)
+//============================
+
+model PropertyIndicativeValuation {
+  indicationId    Int      @id @default(autoincrement()) @map("indication_id")
+  propertyId      Int      @map("property_id")
+
+  // ── Report identity ──────────────────────────
+  indicationNo    String   @unique @map("indication_no") @db.VarChar(50)
+  instructionDate DateTime? @map("instruction_date")
+  indicationDate  DateTime? @map("indication_date")
+  instructedBy    String?   @map("instructed_by")  @db.VarChar(255)
+  intendedUse     String?   @map("intended_use")   @db.VarChar(255)
+
+  // Always = SUM of component min/maxValue
+  // Updated in service layer on every component change
+  minValue  Decimal @map("min_value") @db.Decimal(18, 2)
+  maxValue  Decimal @map("max_value") @db.Decimal(18, 2)
+  forcedSalePercent Decimal? @map("forced_sale_percent") @db.Decimal(5, 2)
+  forcedSaleValue Decimal? @map("forced_sale_value") @db.Decimal(18, 2)
+  currency  String  @default("USD")   @db.VarChar(3)
+
+  // ── Contact ──────────────────────────────────
+  contactName  String? @map("contact_name") @db.VarChar(255)
+  contactTel   String? @map("contact_tel") @db.VarChar(50)
+  chargeFee    Decimal? @map("charge_fee") @db.Decimal(18, 2)
+
+  // ── Assignment ───────────────────────────────
+  valuerId      Int?    @map("valuer_id")
+  inspectorName String? @map("inspector_name") @db.VarChar(100)
+
+  // ── Workflow ──────────────────────────────────
+  status         PropertyIndicativeValuationStatus @default(ACTIVE)
+  workflowStatus WorkflowStatus          @default(DRAFT) @map("workflow_status")
+
+  // ── Rejection ────────────────────────────────
+  rejectionReason String? @map("rejection_reason") @db.Text
+
+  // ── Notes ────────────────────────────────────
+  note          String? @db.Text
+  internalNotes String? @map("internal_notes") @db.Text
+
+  // ── Stored PDF ───────────────────────────────
+  indicativePdfStorageKey String?   @map("indicative_pdf_storage_key") @db.VarChar(500)
+  indicativePdfFileName   String?   @map("indicative_pdf_file_name") @db.VarChar(255)
+  indicativePdfMimeType   String?   @map("indicative_pdf_mime_type") @db.VarChar(100)
+  indicativePdfFileSize   Int?      @map("indicative_pdf_file_size")
+  indicativePdfGeneratedAt DateTime? @map("indicative_pdf_generated_at")
+
+  // ── Audit ────────────────────────────────────
+  approvedBy Int? @map("approved_by")
+  rejectedBy Int? @map("rejected_by")
+  createdBy  Int? @map("created_by")
+  updatedBy  Int? @map("updated_by")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  // ── Relations ─────────────────────────────────
+  property      Property @relation(fields: [propertyId], references: [propertyId], onDelete: Restrict)
+  valuer        User?    @relation("IndicativeValuer",    fields: [valuerId],    references: [id])
+  approvedUser  User?    @relation("IndicativeApprover",  fields: [approvedBy],  references: [id])
+  rejectedUser  User?    @relation("IndicativeRejecter",  fields: [rejectedBy],  references: [id])
+  createdByUser User?    @relation("IndicativeCreatedBy", fields: [createdBy],   references: [id])
+  updatedByUser User?    @relation("IndicativeUpdatedBy", fields: [updatedBy],   references: [id])
+
+  components IndicativeValuationComponent[]
+
+  @@index([propertyId])
+  @@index([indicationDate])
+  @@index([status])
+  @@index([workflowStatus])
+  @@map("property_indicative_valuations")
+}
+model IndicativeValuationComponent {
+  id           Int @id @default(autoincrement())
+  indicationId Int @map("indication_id")
+
+  sortOrder     Int                     @default(0)    @map("sort_order")
+  componentType IndicativeComponentType @default(LAND) @map("component_type")
+  description   String?                 @db.VarChar(255) // "Land", "Building"
+
+  // Measurement
+  area Decimal @db.Decimal(18, 4)
+
+  // Range rate
+  minRate  Decimal @map("min_rate")  @db.Decimal(18, 4)
+  maxRate  Decimal @map("max_rate")  @db.Decimal(18, 4)
+
+  minValue Decimal @map("min_value") @db.Decimal(18, 2)
+  maxValue Decimal @map("max_value") @db.Decimal(18, 2)
+
+  indication PropertyIndicativeValuation  @relation(fields:     [indicationId],   references: [indicationId],onDelete:   Cascade)
+    
+  @@index([indicationId])
+  @@index([componentType])  
+  @@map("indicative_valuation_components")
+}
+
+
+///=====================
+// Sales Comparison Approach
+///=========================
+
+model SalesComparisonValuation {
+  salesComparisonId Int @id @default(autoincrement()) @map("sales_comparison_id")
+  valuationId       Int @unique @map("valuation_id")
+
+  // Results
+  marketValue       Decimal? @map("market_value") @db.Decimal(15, 2)
+  landUnitPrice     Decimal? @map("land_unit_price") @db.Decimal(15, 2)
+  buildingUnitPrice Decimal? @map("building_unit_price") @db.Decimal(15, 2)
+
+  // Calculation
+  comparablesUsed   Int     @map("comparables_used")
+  averageAdjustment Decimal @map("average_adjustment") @db.Decimal(5, 2)
+  adjustmentRange   String? @map("adjustment_range") @db.VarChar(100)
+
+  // Methodology
+  weightingMethod String? @map("weighting_method") @db.VarChar(100)
+
+  // Quality Indicators
+  comparablesQuality String? @map("comparables_quality") @db.VarChar(100)
+  dataReliability    String? @map("data_reliability") @db.VarChar(100)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  valuation PropertyValuation @relation(fields: [valuationId], references: [valuationId], onDelete: Cascade)
+
+  comparable ValuationComparable[]
+
+  @@map("sales_comparison_valuations")
+}
+
+// ===========================
+// Income Approach
+//============================
+model IncomeApproachValuation {
+  incomeApproachId Int @id @default(autoincrement()) @map("income_approach_id")
+  valuationId      Int @unique @map("valuation_id")
+
+  // Results
+  investmentValue Decimal @db.Decimal(15, 2)
+
+  // INcome Components
+  monthlyRent          Decimal @db.Decimal(15, 2)
+  annualGrossIncome    Decimal @map("annual_gross_income") @db.Decimal(15, 2)
+  effectiveGrossIncome Decimal @map("effective_gross_income") @db.Decimal(15, 2)
+  netOperatingIncome   Decimal @map("net_operating_income") @db.Decimal(15, 2)
+
+  // Deductions
+  vacancyLoss Decimal @map("vacancy_loss") @db.Decimal(15, 2)
+  vacancyRate Decimal @map("vacancy_rate") @db.Decimal(5, 2)
+
+  // Operating Expenses
+  totalOperatingExpenses Decimal  @map("total_operating_expenses") @db.Decimal(15, 2)
+  managementFees         Decimal  @map("management_fees") @db.Decimal(15, 2)
+  maintenanceCosts       Decimal  @map("maintenance_costs") @db.Decimal(15, 2)
+  propertyTax            Decimal  @map("property_tax") @db.Decimal(15, 2)
+  insurance              Decimal  @map("insurance") @db.Decimal(15, 2)
+  utilities              Decimal? @map("utilities") @db.Decimal(15, 2)
+  otherExpenses          Decimal? @map("other_expenses") @db.Decimal(15, 2)
+
+  // Ratios & Rates
+  capitalizationRate    Decimal  @map("capitalization_rate") @db.Decimal(5, 2)
+  operatingExpenseRatio Decimal  @map("operating_expense_ratio") @db.Decimal(5, 2)
+  grossRentMultiplier   Decimal  @map("gross_rent_multiplier") @db.Decimal(10, 2)
+  cashOnCashReturn      Decimal? @map("cash_on_cash_return") @db.Decimal(5, 2)
+
+  // Detailed Breakdown
+  incomeBreakdown  Json? @map("income_breakdown")
+  expenseBreakdown Json? @map("expense_breakdown")
+
+  // Assumptions
+  capRateSource            String? @map("cap_rate_source") @db.VarChar(255)
+  vacancyRateJustification String? @map("vacancy_rate_justification") @db.Text
+  expenseAssumptions       String? @map("expense_assumptions") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  valuation PropertyValuation @relation(fields: [valuationId], references: [valuationId], onDelete: Cascade)
+
+  @@map("income_approach_valuations")
+}
+
+// ===========================
+// Cost Approach
+//============================
+model CostApproachValuation {
+  costApproachId Int @id @default(autoincrement()) @map("cost_approach_id")
+  valuationId    Int @unique @map("valuation_id")
+
+  // Results
+  fairValue Decimal @map("fair_value") @db.Decimal(15, 2)
+
+  // Land Component
+  landValue       Decimal @map("land_value") @db.Decimal(15, 2)
+  landAreaSqm     Decimal @map("land_area_sqm") @db.Decimal(10, 2)
+  landPricePerSqm Decimal @map("land_price_per_sqm") @db.Decimal(15, 2)
+
+  // Building Component
+  buildingValue          Decimal  @map("building_value") @db.Decimal(15, 2)
+  buildingAreaSqm        Decimal? @map("building_area_sqm") @db.Decimal(10, 2)
+  replacementCostNew     Decimal  @map("replacement_cost_new") @db.Decimal(15, 2)
+  constructionCostPerSqm Decimal  @map("construction_cost_per_sqm") @db.Decimal(15, 2)
+
+  // Depreciation Breakdown
+  totalDepreciation        Decimal @map("total_depreciation") @db.Decimal(15, 2)
+  totalDepreciationPercent Decimal @map("total_depreciation_percent") @db.Decimal(5, 2)
+
+  physicalDepreciation       Decimal @map("physical_depreciation") @db.Decimal(5, 2)
+  physicalDepreciationAmount Decimal @map("physical_depreciation_amount") @db.Decimal(15, 2)
+
+  functionalObsolescence       Decimal @map("functional_obsolescence") @db.Decimal(5, 2)
+  functionalObsolescenceAmount Decimal @map("functional_obsolescence_amount") @db.Decimal(15, 2)
+  functionalObsolescenceReason String? @map("functional_obsolescence_reason") @db.Text
+
+  externalObsolescence       Decimal @map("external_obsolescence") @db.Decimal(5, 2)
+  externalObsolescenceAmount Decimal @map("external_obsolescence_amount") @db.Decimal(15, 2)
+  externalObsolescenceReason String? @map("external_obsolescence_reason") @db.Text
+
+  // Age & Life
+  constructionYear Int @map("construction_year")
+  currentYear      Int @map("current_year")
+  actualAge        Int @map("actual_age")
+  effectiveAge     Int @map("effective_age")
+  economicLife     Int @map("economic_life")
+  remainingLife    Int @map("remaining_life")
+
+  // Construction Details
+  buildingType        String? @map("building_type") @db.VarChar(100)
+  constructionQuality String? @map("construction_quality") @db.VarChar(20)
+  buildingCondition   String? @map("building_condition") @db.VarChar(50)
+
+  // Detailed Breakdown
+  costBreakdown Json? @map("cost_breakdown")
+
+  // Methodology
+  depreciationMethod String? @map("depreciation_method") @db.VarChar(100)
+  landValueSource    String? @map("land_value_source") @db.VarChar(255)
+  costEstimateSource String? @map("cost_estimate_source") @db.VarChar(255)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  valuation PropertyValuation @relation(fields: [valuationId], references: [valuationId], onDelete: Cascade)
+
+  @@map("cost_approach_valuations")
+}
+
+// ===========================
+// Transactions
+//============================
+
+model Transaction {
+  transactionId   Int             @id @default(autoincrement()) @map("transaction_id")
+  propertyId      Int             @map("property_id")
+  valuationId     Int?            @map("valuation_id")
+  transactionType TransactionType @map("transaction_type")
+  transactionDate DateTime        @map("transaction_date")
+
+  // Transaction Price
+  totalPrice Decimal @map("total_price") @db.Decimal(15, 2)
+
+  // Calculated Results (Auto-computed by service)
+  newBuildingCost      Decimal? @map("new_building_cost") @db.Decimal(15, 2)
+  depreciationAmount   Decimal? @map("depreciation_amount") @db.Decimal(15, 2)
+  currentBuildingValue Decimal? @map("current_building_value") @db.Decimal(15, 2)
+  residualLandValue    Decimal? @map("residual_land_value") @db.Decimal(15, 2)
+  pricePerSqm          Decimal? @map("price_per_sqm") @db.Decimal(15, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  property  Property           @relation(fields: [propertyId], references: [propertyId], onDelete: Cascade)
+  valuation PropertyValuation? @relation(fields: [valuationId], references: [valuationId])
+
+  @@index([propertyId])
+  @@index([valuationId])
+  @@index([transactionType])
+  @@index([transactionDate])
+  @@map("transactions")
+}
+
+// Reporting and Auditing
+
+model GeneratedReport {
+  reportId   Int            @id @default(autoincrement()) @map("report_id")
+  reportName String         @map("report_name") @db.VarChar(100)
+  reportType ReportTypeEnum @map("report_type")
+
+  generatedByUserId Int      @map("generated_by")
+  generatedAt       DateTime @default(now()) @map("generated_at")
+  fileUrl           String   @map("report_url") @db.VarChar(500)
+  description       String?  @db.Text
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  generatedByUser User  @relation("generatedByUser", fields: [generatedByUserId], references: [id])
+  reportUser      User? @relation("ReportUser", fields: [userId], references: [id])
+  userId          Int?
+
+  @@index([generatedByUserId])
+  @@map("generated_reports")
+}
+
+// Geographic Tables
+model Province {
+  code      String   @id @map("province_id") @db.VarChar(10)
+  nameKh    String   @map("province_name_kh") @db.VarChar(100)
+  nameEn    String   @map("province_name_en") @db.VarChar(100)
+
+  geom      Unsupported("geometry(MultiPolygon, 4326)")? @map("geom")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  districts       District[]
+  PropertyAddress PropertyAddress[]
+
+  @@index([nameEn])
+  @@index([nameKh])
+  @@index([geom], map: "idx_provinces_geom", type: Gist)
+  @@map("provinces")
+}
+
+model District {
+  code       String   @id @map("district_id") @db.VarChar(10)
+  provinceId String   @map("province_id") @db.VarChar(10)
+  nameKh     String   @map("district_name_kh") @db.VarChar(100)
+  nameEn     String   @map("district_name_en") @db.VarChar(100)
+
+  geom      Unsupported("geometry(MultiPolygon, 4326)")? @map("geom")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  province        Province          @relation(fields: [provinceId], references: [code])
+  communes        Commune[]
+  PropertyAddress PropertyAddress[]
+
+  @@index([provinceId])
+  @@index([nameEn])
+  @@index([nameKh])
+  @@index([provinceId, nameEn])
+  @@index([geom], map: "idx_districts_geom", type: Gist)
+  @@map("districts")
+}
+
+model Commune {
+  code       String   @id @map("commune_id") @db.VarChar(10)
+  districtId String   @map("district_id") @db.VarChar(10)
+  nameKh     String   @map("commune_name_kh") @db.VarChar(100)
+  nameEn     String   @map("commune_name_en") @db.VarChar(100)
+
+  geom      Unsupported("geometry(MultiPolygon, 4326)")? @map("geom")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  district        District          @relation(fields: [districtId], references: [code])
+  PropertyAddress PropertyAddress[]
+  villages        Village[]
+
+  @@index([districtId])
+  @@index([nameEn])
+  @@index([nameKh])
+  @@index([districtId, nameEn])
+  @@index([geom], map: "idx_communes_geom", type: Gist)
+  @@map("communes")
+}
+
+model Village {
+  code      String   @id @map("village_id") @db.VarChar(20)
+  communeId String   @map("commune_id") @db.VarChar(10)
+  nameKh    String   @map("village_name_kh") @db.VarChar(100)
+  nameEn    String   @map("village_name_en") @db.VarChar(100)
+
+  geom      Unsupported("geometry(MultiPolygon, 4326)")? @map("geom")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  commune         Commune           @relation(fields: [communeId], references: [code])
+  PropertyAddress PropertyAddress[]
+
+  @@index([communeId])
+  @@index([nameEn])
+  @@index([nameKh])
+  @@index([communeId, nameEn])
+  @@index([geom], map: "idx_villages_geom", type: Gist)
+  @@map("villages")
+}
+
+model PropertyAddress {
+  addressId        Int     @id @default(autoincrement()) @map("address_id")
+  propertyId       Int     @unique @map("property_id")
+  // storing offical codes as strings
+  provinceId       String  @map("province_id") @db.VarChar(10)
+  districtId       String  @map("district_id") @db.VarChar(10)
+  communeId        String  @map("commune_id") @db.VarChar(10)
+  villageId        String?  @map("village_id") @db.VarChar(20)
+  // Address details
+  street           String? @db.VarChar(150)
+  houseNo          String? @map("house_no") @db.VarChar(50)
+  titleAddress     String? @map("title_address") @db.VarChar(255)
+  accessRoads      String? @map("access_roads")
+  neighborLocation String? @map("neighbor_location")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  province Province @relation(fields: [provinceId], references: [code])
+  district District @relation(fields: [districtId], references: [code])
+  commune  Commune  @relation(fields: [communeId], references: [code])
+  village  Village?  @relation(fields: [villageId], references: [code])
+
+  property Property @relation(fields: [propertyId], references: [propertyId], onDelete: Cascade)
+
+  @@index([provinceId])
+  @@index([districtId])
+  @@index([communeId])
+  @@index([villageId])
+  @@index([provinceId, districtId])
+  @@index([provinceId, districtId, communeId])
+  @@index([provinceId, districtId, communeId, villageId])
+  @@map("property_address")
+}
+
+model PropertyLocation {
+  locationId       Int                                      @id @default(autoincrement()) @map("location_id")
+  propertyId       Int                                      @unique @map("property_id")
+  latitude         Decimal?                                 @map("latitude") @db.Decimal(10, 7)
+  longitude        Decimal?                                 @map("longitude") @db.Decimal(10, 7)
+  googlePoint      String?                                  @map("google_point")
+  geolocationLink  String?                                  @map("geolocation_link") @db.VarChar(500)
+  polygon          Json?
+  formattedAddress String?                                  @map("formatted_address") @db.VarChar(255)
+  placeId          String?                                  @map("place_id") @db.VarChar(100)
+  srid             Int?                                     @default(4326)
+  // PostGIS Geometry Fields
+  geom             Unsupported("geometry(Point, 4326)")?    @map("geom")
+  geomPolygon      Unsupported("geometry(Polygon, 4326)")?  @map("geom_polygon")
+
+  // Optional computed (keep for info/search)
+  areaSqM          Float?                                   @map("area_sq_m") @db.DoublePrecision
+  perimeterM       Float?                                   @map("perimeter_m") @db.DoublePrecision
+
+  // Manual overrides (authoritative for display)
+  userLengthM      Float?                                   @map("user_length_m") @db.DoublePrecision
+  userHeightM      Float?                                   @map("user_height_m") @db.DoublePrecision
+  
+  createdAt        DateTime                                 @default(now()) @map("created_at")
+  updatedAt        DateTime                                 @updatedAt @map("updated_at")
+
+  property Property @relation(fields: [propertyId], references: [propertyId], onDelete: Cascade)
+
+  @@index([latitude, longitude])
+  @@index([placeId])
+  @@index([geom], map: "idx_property_location_geom", type: Gist)
+  @@index([geomPolygon], map: "idx_property_location_geom_polygon", type: Gist)
+  @@map("property_locations")
+}
+
+model Notification {
+  id          Int      @id @default(autoincrement()) @map("notification_id")
+  userId      Int      @map("user_id")
+  createdBy   Int?     @map("created_by")
+  type        NotificationType @map("type")
+  title       String   @map("title") @db.VarChar(255)
+  message     String   @map("message") @db.Text
+  entityType  String?  @map("entity_type") @db.VarChar(100)
+  entityId    Int?     @map("entity_id")
+  actionUrl  String?  @map("action_url") @db.VarChar(500)
+  isRead      Boolean  @default(false) @map("is_read")
+  readAt      DateTime? @map("read_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user          User  @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  createdByUser User? @relation("NotificationCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@index([createdBy])
+  @@index([type])
+  @@map("notifications")
+}

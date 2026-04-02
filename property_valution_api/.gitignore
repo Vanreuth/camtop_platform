@@ -1,0 +1,19 @@
+# Environment variables
+.env
+.env*.local
+.env.development
+.env.test
+.env.production
+
+
+node_modules
+dist
+.env*
+*.log
+coverage
+.DS_Store
+.vscode
+.idea
+
+# Generated secrets file
+secrets.txt

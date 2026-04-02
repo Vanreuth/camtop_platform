@@ -1,0 +1,92 @@
+services:
+  - type: web
+    name: property-valuation-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build && npx prisma migrate deploy && npm run deploy:seed
+    startCommand: npm run start
+    healthCheckPath: /healthz
+    envVars:
+      - key: TZ
+        value: Asia/Phnom_Penh
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "20"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: property-valuation-db
+          property: connectionString
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: property-valuation-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: property-valuation-db
+          property: port
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: property-valuation-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: property-valuation-db
+          property: password
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: property-valuation-db
+          property: database
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 30m
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 14d
+      - key: CORS_ORIGINS
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_LOGO_URL
+        value: https://camtopproperty.site/logo/camtop_logo.png
+      - key: EMAIL_VERIFY_LINK_TARGET
+        value: backend
+      - key: RESEND_API_KEY
+        sync: false
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: CLOUDFLARE_ACCESS_KEY_ID
+        sync: false
+      - key: CLOUDFLARE_SECRET_ACCESS_KEY
+        sync: false
+      - key: CLOUDFLARE_BUCKET_NAME
+        sync: false
+      - key: CLOUDFLARE_R2_PUBLIC_URL
+        sync: false
+      - key: GOOGLE_GEOCODING_API_KEY
+        sync: false
+      - key: GOOGLE_MAP_API_KEY
+        sync: false
+      - key: RUN_SEED
+        value: "false"
+
+databases:
+  - name: property-valuation-db
+    plan: free
+    databaseName: property_valuation
+    user: property_valuation_user
+    postgresMajorVersion: "15"

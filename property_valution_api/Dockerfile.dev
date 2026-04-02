@@ -1,0 +1,19 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install deps first (better caching)
+COPY package*.json ./
+RUN npm install
+
+# Copy Prisma schema and generate client
+COPY prisma ./prisma
+RUN npx prisma generate
+
+# Copy the rest
+COPY . .
+
+EXPOSE 4000
+EXPOSE 5555
+
+CMD ["npm", "run", "dev"]
