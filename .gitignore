@@ -1,39 +1,60 @@
-# Dependencies
-node_modules/
-property_valution_api/node_modules/
-property_valution_system/node_modules/
+# ─────────────────────────────────────────────────────────────────────────
+#  Root .gitignore  –  Monorepo (backend + frontend + infra)
+# ─────────────────────────────────────────────────────────────────────────
 
-# Environment files
+# ── Dependencies ──────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# ── Environment files (NEVER commit real .env) ────────
 .env
-.env.*
-!.env.example
+.env.local
+.env.*.local
+infra/.env
+!infra/.env.example
 property_valution_api/.env
 property_valution_api/.env.*
 !property_valution_api/.env.example
 property_valution_system/.env
 property_valution_system/.env.*
+!property_valution_system/.env.example
 
-# Build output
+# ── Build outputs ─────────────────────────────────────
 dist/
 build/
+out/
 coverage/
 property_valution_api/dist/
 property_valution_system/.next/
 property_valution_system/out/
-property_valution_system/build/
 
-# Logs
+# ── Docker / Infra volumes (host paths) ───────────────
+infra/postgres_data/
+infra/npm/
+infra/backups/
+
+# ── Logs ─────────────────────────────────────────────
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+lerna-debug.log*
 
-# OS / IDE
+# ── OS / IDE ─────────────────────────────────────────
 .DS_Store
+Thumbs.db
 .idea/
 .vscode/
+*.swp
+*.swo
 
-# TypeScript / Next.js
+# ── TypeScript ────────────────────────────────────────
 *.tsbuildinfo
 next-env.d.ts
+
+# ── Misc ──────────────────────────────────────────────
+.turbo/
+*.pem
+*.key
+*.crt

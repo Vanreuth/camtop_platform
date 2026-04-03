@@ -822,7 +822,6 @@ export default function EditPropertyPage() {
                     Number(u?.buildingId) > 0 &&
                     Number(u.buildingId) === Number(b.buildingId)
                 );
-
           return {
             buildingId: b.buildingId?.toString() || "",
             buildingName: b.buildingName || `Building ${b.buildingId}`,

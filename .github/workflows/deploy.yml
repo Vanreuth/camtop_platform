@@ -1,0 +1,105 @@
+name: Property Valuation System
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:        # manual trigger from GitHub UI
+  schedule:
+    - cron: "0 19 * * *"   # 19:00 UTC = 02:00 next day Asia/Phnom_Penh
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false  # never cancel a running deploy
+
+jobs:
+  # ─────────────────────────────────────────────────
+  # JOB 1: Lint & Type-check (runs on GitHub runner)
+  # ─────────────────────────────────────────────────
+  lint-and-check:
+    name: 🔍 Lint & Type-check
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'   # skip lint on scheduled backups
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            property_valution_api/package-lock.json
+            property_valution_system/package-lock.json
+
+      - name: Install backend deps
+        working-directory: property_valution_api
+        run: npm ci
+
+      - name: Type-check backend
+        working-directory: property_valution_api
+        run: npx tsc --noEmit
+
+      - name: Install frontend deps
+        working-directory: property_valution_system
+        run: npm ci
+
+      - name: Type-check frontend
+        working-directory: property_valution_system
+        run: npx tsc --noEmit
+
+  # ─────────────────────────────────────────────────
+  # JOB 2: Deploy to Contabo VPS via SSH
+  # ─────────────────────────────────────────────────
+  deploy:
+    name: 🐳 Deploy to Contabo
+    runs-on: ubuntu-latest
+    needs: lint-and-check
+    if: |
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch'
+    environment: production
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:            ${{ secrets.SERVER_HOST }}
+          username:        ${{ secrets.SERVER_USER }}
+          key:             ${{ secrets.SERVER_SSH_KEY }}
+          port:            ${{ secrets.SERVER_PORT }}
+          timeout:         600s
+          command_timeout: 30m
+          script: |
+            set -euo pipefail
+            export DEPLOY_PATH="${{ secrets.DEPLOY_PATH }}"
+            bash "${{ secrets.DEPLOY_PATH }}/infra/scripts/deploy.sh"
+
+      - name: ✅ Deployment succeeded
+        if: success()
+        run: echo "Deployment to Contabo VPS succeeded at $(date -u '+%Y-%m-%d %H:%M UTC')"
+
+      - name: ❌ Deployment failed
+        if: failure()
+        run: echo "Deployment FAILED. Check server → /var/log/property-valuation-deploy.log"
+
+  # ─────────────────────────────────────────────────
+  # JOB 3: Scheduled daily DB backup
+  # ─────────────────────────────────────────────────
+  scheduled-backup:
+    name: 💾 Daily DB Backup
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Trigger backup on VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key:      ${{ secrets.SERVER_SSH_KEY }}
+          port:     ${{ secrets.SERVER_PORT }}
+          timeout:  120s
+          script: |
+            docker exec property_valuation_db_backup sh /backup-db.sh
+            echo "✅ Backup completed at $(date)"

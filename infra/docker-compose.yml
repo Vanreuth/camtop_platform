@@ -1,0 +1,168 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────
+#  Production Docker Compose – Contabo VPS
+#  Services: npm | postgres | backend | frontend
+# ─────────────────────────────────────────────
+
+networks:
+  proxy:        # exposed through NPM
+    driver: bridge
+  internal:     # back‑end ↔ DB (not reachable from host)
+    driver: bridge
+    internal: true
+
+volumes:
+  npm_data:
+  npm_letsencrypt:
+  postgres_data:
+  backups:
+
+services:
+
+  # ── Nginx Proxy Manager ──────────────────────
+  npm:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: nginx_proxy_manager
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "81:81"      # Admin UI (block this port in UFW after setup)
+      - "443:443"
+    volumes:
+      - npm_data:/data
+      - npm_letsencrypt:/etc/letsencrypt
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:81/api/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ── PostgreSQL + PostGIS ─────────────────────
+  postgres:
+    image: postgis/postgis:15-3.4-alpine
+    container_name: property_valuation_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ:                ${TZ:-Asia/Phnom_Penh}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../property_valution_api/init-postgis.sql:/docker-entrypoint-initdb.d/01-init-postgis.sql:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Do NOT expose 5432 to host in production
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+
+  # ── Backend API (Node / Express / Prisma) ───
+  backend:
+    build:
+      context: ../property_valution_api
+      dockerfile: Dockerfile.prod
+    image: property_valuation_api:latest
+    container_name: property_valuation_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV:      production
+      TZ:            ${TZ:-Asia/Phnom_Penh}
+      DATABASE_URL:  postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:   ${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+      - proxy
+    expose:
+      - "4000"
+    command: >
+      sh -c "
+        echo '⏳ Running Prisma migrations...' &&
+        npx prisma migrate deploy &&
+        echo '✅ Migrations done. Starting server...' &&
+        node dist/server.js
+      "
+    healthcheck:
+      test: ["CMD", "node", "-e",
+        "require('http').get('http://localhost:4000/healthz', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  # ── Frontend (Next.js) ───────────────────────
+  frontend:
+    build:
+      context: ../property_valution_system
+      dockerfile: Dockerfile.prod
+    image: property_valuation_frontend:latest
+    container_name: property_valuation_frontend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      TZ:       ${TZ:-Asia/Phnom_Penh}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY}
+      NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - proxy
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ── Daily DB Backup (cron-style) ─────────────
+  db-backup:
+    image: postgres:15-alpine
+    container_name: property_valuation_db_backup
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_HOST:     postgres
+      TZ:                ${TZ:-Asia/Phnom_Penh}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+    volumes:
+      - backups:/backups
+      - ./scripts/backup-db.sh:/backup-db.sh:ro
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Run once on start, then via cron inside the container
+    entrypoint: >
+      sh -c "
+        apk add --no-cache dcron &&
+        echo '0 2 * * * sh /backup-db.sh >> /var/log/backup.log 2>&1' | crontab - &&
+        sh /backup-db.sh &&
+        crond -f -l 6
+      "
