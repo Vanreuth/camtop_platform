@@ -21,6 +21,7 @@ export type MapTypeId = "roadmap" | "satellite" | "hybrid" | "terrain";
 export interface GoogleMapGISProps {
   coordinates: { latitude: number; longitude: number };
   addressCodes: AddressData;
+  preservePinWhenInsideSelectedBoundary?: boolean;
 
   onCoordinatesChange?: (coords: { latitude: number; longitude: number }) => void;
   onAddressCodesChange?: (address: AddressData) => void;

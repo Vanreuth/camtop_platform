@@ -28,6 +28,7 @@ type ReverseGeocodedAddress = {
 	route?: string;
 	locality?: string;
 	sublocality?: string;
+	village?: string;
 	province?: string;
 	district?: string;
 	commune?: string;
@@ -283,6 +284,7 @@ export class PropertyAddressService {
 
 		const villageTerms = buildUniqueTerms(
 			levelTerms.village,
+			reverseGeocoded?.village,
 			reverseGeocoded?.sublocality,
 			formattedAddress
 		);
@@ -355,6 +357,7 @@ export class PropertyAddressService {
 		if (village && commune && village.communeId !== commune.code) {
 			const villageTerms = buildUniqueTerms(
 				levelTerms.village,
+				reverseGeocoded?.village,
 				reverseGeocoded?.sublocality,
 				formattedAddress
 			);
@@ -365,6 +368,7 @@ export class PropertyAddressService {
 		if (!village && commune) {
 			const villageTerms = buildUniqueTerms(
 				levelTerms.village,
+				reverseGeocoded?.village,
 				reverseGeocoded?.sublocality,
 				formattedAddress
 			);
@@ -500,7 +504,10 @@ export class PropertyAddressService {
 
 		hierarchy = await this.alignHierarchyWithinParents(
 			hierarchy,
-			formattedAddress || geocodedAddress?.formattedAddress || null,
+			formattedAddress ||
+				reverseGeocoded?.formattedAddress ||
+				geocodedAddress?.formattedAddress ||
+				null,
 			reverseGeocoded
 		);
 

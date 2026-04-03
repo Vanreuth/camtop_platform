@@ -390,9 +390,12 @@ const parseAddressComponents = (
   route?: string;
   locality?: string;
   sublocality?: string;
+  sublocalityLevel2?: string;
+  neighborhood?: string;
   administrativeAreaLevel1?: string; // Province/State
   administrativeAreaLevel2?: string; // District
   administrativeAreaLevel3?: string; // Commune/Sangkat
+  administrativeAreaLevel4?: string; // Village/Lower admin area
   country?: string;
   postalCode?: string;
 } => {
@@ -416,6 +419,12 @@ const parseAddressComponents = (
     ) {
       parsed.sublocality = component.long_name;
     }
+    if (types.includes("sublocality_level_2")) {
+      parsed.sublocalityLevel2 = component.long_name;
+    }
+    if (types.includes("neighborhood")) {
+      parsed.neighborhood = component.long_name;
+    }
     if (types.includes("administrative_area_level_1")) {
       parsed.administrativeAreaLevel1 = component.long_name; // Province
     }
@@ -424,6 +433,9 @@ const parseAddressComponents = (
     }
     if (types.includes("administrative_area_level_3")) {
       parsed.administrativeAreaLevel3 = component.long_name; // Commune
+    }
+    if (types.includes("administrative_area_level_4")) {
+      parsed.administrativeAreaLevel4 = component.long_name; // Village
     }
     if (types.includes("country")) {
       parsed.country = component.long_name;
@@ -449,6 +461,7 @@ const getAddressFromCoordinates = async (
   route?: string;
   locality?: string;
   sublocality?: string;
+  village?: string;
   province?: string;
   district?: string;
   commune?: string;
@@ -474,9 +487,21 @@ const getAddressFromCoordinates = async (
       route: parsed.route,
       locality: parsed.locality,
       sublocality: parsed.sublocality,
+      village:
+        parsed.administrativeAreaLevel4 ??
+        parsed.sublocalityLevel2 ??
+        parsed.neighborhood,
       province: parsed.administrativeAreaLevel1,
-      district: parsed.administrativeAreaLevel2,
-      commune: parsed.administrativeAreaLevel3,
+      district:
+        parsed.administrativeAreaLevel2 ??
+        parsed.locality ??
+        parsed.sublocality,
+      commune:
+        parsed.administrativeAreaLevel3 ??
+        parsed.administrativeAreaLevel4 ??
+        parsed.sublocality ??
+        parsed.sublocalityLevel2 ??
+        parsed.locality,
       country: parsed.country,
       postalCode: parsed.postalCode,
       googleMapLink: getGoogleMapLink(latitude, longitude),

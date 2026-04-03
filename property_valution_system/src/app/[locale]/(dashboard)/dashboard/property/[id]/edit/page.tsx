@@ -58,9 +58,13 @@ import {
 import { normalizeTransactionType } from "@/constants/transactionOptions";
 import { propertyAddressService } from "@/hooks/propertyAddress/propertyAddress.service";
 import {
+  ensureResolvedAddressHierarchy,
+  getAddressEntityCode,
+  toResolvedAddressItem,
   completeResolvedHierarchyFromDetectedAddress,
   type ResolvedAddressDraft,
 } from "@/utils/propertyAddressResolution";
+import type { ResolvedAddressHierarchyItems } from "@/types/propertyAddress.types";
 
 // Helper function to clean rejection reasons from description
 function cleanRejectionReasons(description: string): string {
@@ -87,6 +91,52 @@ const toDateInputValue = (value?: string | null) => {
 
 const DEFAULT_ADDRESS_LATITUDE = 11.5564;
 const DEFAULT_ADDRESS_LONGITUDE = 104.9282;
+const EMPTY_RESOLVED_ADDRESS_ITEMS: ResolvedAddressHierarchyItems = {
+  province: null,
+  district: null,
+  commune: null,
+  village: null,
+};
+
+const pickFirstNonEmpty = (...values: Array<string | null | undefined>): string | null => {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+
+  return null;
+};
+
+const parseCoordinatePairInput = (
+  value: string
+): { latitude: string; longitude: string } | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(
+    /^\s*(-?\d+(?:\.\d+)?)\s*[,/\s]+\s*(-?\d+(?:\.\d+)?)\s*$/u
+  );
+  if (!match) return null;
+
+  const latitude = Number.parseFloat(match[1]);
+  const longitude = Number.parseFloat(match[2]);
+
+  if (
+    !Number.isFinite(latitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    !Number.isFinite(longitude) ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return null;
+  }
+
+  return {
+    latitude: latitude.toFixed(6),
+    longitude: longitude.toFixed(6),
+  };
+};
 
 const ALLOWED_BUILDING_VIEW_TYPES = [
   "CITY_VIEW",
@@ -200,10 +250,12 @@ export default function EditPropertyPage() {
   const originalDataRef = useRef<{
     formData: typeof formData | null;
     addressCodes: typeof addressCodes | null;
+    resolvedAddressItems: ResolvedAddressHierarchyItems | null;
     photoPreview: typeof photoPreview | null;
   }>({
     formData: null,
     addressCodes: null,
+    resolvedAddressItems: null,
     photoPreview: null,
   });
 
@@ -306,6 +358,8 @@ export default function EditPropertyPage() {
     communeId: null,
     villageId: null,
   });
+  const [resolvedAddressItems, setResolvedAddressItems] =
+    useState<ResolvedAddressHierarchyItems>(EMPTY_RESOLVED_ADDRESS_ITEMS);
   const lastResolvedAddressKeyRef = useRef("");
   const activeResolveRequestRef = useRef(0);
   const preserveTypedDetectedAddressRef = useRef(false);
@@ -324,6 +378,7 @@ export default function EditPropertyPage() {
       villageId: string | null;
     }) => {
       setAddressCodes(address);
+      setResolvedAddressItems(EMPTY_RESOLVED_ADDRESS_ITEMS);
       setFormData((prev) => ({
         ...prev,
         provinceId: address.provinceId || "",
@@ -364,6 +419,12 @@ export default function EditPropertyPage() {
         districtId: resolved.districtId ?? null,
         communeId: resolved.communeId ?? null,
         villageId: resolved.villageId ?? null,
+      });
+      setResolvedAddressItems({
+        province: resolved.province ?? null,
+        district: resolved.district ?? null,
+        commune: resolved.commune ?? null,
+        village: resolved.village ?? null,
       });
     }
 
@@ -413,6 +474,78 @@ export default function EditPropertyPage() {
       };
     });
   }, []);
+
+  useEffect(() => {
+    const nextCodes = {
+      provinceId: pickFirstNonEmpty(
+        formData.provinceId,
+        addressCodes.provinceId,
+        resolvedAddressItems.province?.code
+      ),
+      districtId: pickFirstNonEmpty(
+        formData.districtId,
+        addressCodes.districtId,
+        resolvedAddressItems.district?.code
+      ),
+      communeId: pickFirstNonEmpty(
+        formData.communeId,
+        addressCodes.communeId,
+        resolvedAddressItems.commune?.code
+      ),
+      villageId: pickFirstNonEmpty(
+        formData.villageId,
+        addressCodes.villageId,
+        resolvedAddressItems.village?.code
+      ),
+    };
+
+    setAddressCodes((prev) => {
+      if (
+        prev.provinceId === nextCodes.provinceId &&
+        prev.districtId === nextCodes.districtId &&
+        prev.communeId === nextCodes.communeId &&
+        prev.villageId === nextCodes.villageId
+      ) {
+        return prev;
+      }
+
+      return nextCodes;
+    });
+
+    setFormData((prev) => {
+      const nextFormData = {
+        ...prev,
+        provinceId: pickFirstNonEmpty(prev.provinceId, nextCodes.provinceId) ?? "",
+        districtId: pickFirstNonEmpty(prev.districtId, nextCodes.districtId) ?? "",
+        communeId: pickFirstNonEmpty(prev.communeId, nextCodes.communeId) ?? "",
+        villageId: pickFirstNonEmpty(prev.villageId, nextCodes.villageId) ?? "",
+      };
+
+      if (
+        nextFormData.provinceId === prev.provinceId &&
+        nextFormData.districtId === prev.districtId &&
+        nextFormData.communeId === prev.communeId &&
+        nextFormData.villageId === prev.villageId
+      ) {
+        return prev;
+      }
+
+      return nextFormData;
+    });
+  }, [
+    addressCodes.communeId,
+    addressCodes.districtId,
+    addressCodes.provinceId,
+    addressCodes.villageId,
+    formData.communeId,
+    formData.districtId,
+    formData.provinceId,
+    formData.villageId,
+    resolvedAddressItems.commune?.code,
+    resolvedAddressItems.district?.code,
+    resolvedAddressItems.province?.code,
+    resolvedAddressItems.village?.code,
+  ]);
 
   // Handle reverse geocoding from map
   const handleReverseGeocode = useCallback(async (data: any) => {
@@ -521,6 +654,14 @@ export default function EditPropertyPage() {
       }
     }
 
+    normalizedResolved = await ensureResolvedAddressHierarchy(normalizedResolved);
+
+    const shouldCompleteFromResolvedAddress = !(
+      normalizedResolved.provinceId &&
+      normalizedResolved.districtId &&
+      normalizedResolved.communeId
+    );
+
     if (shouldPreferTypedDetectedAddress) {
       try {
         normalizedResolved = await completeResolvedHierarchyFromDetectedAddress(
@@ -532,6 +673,18 @@ export default function EditPropertyPage() {
         );
       } catch (error) {
         console.error("Failed to complete property edit typed detected address", error);
+      }
+    } else if (
+      shouldCompleteFromResolvedAddress &&
+      normalizedResolved.formattedAddress?.trim()
+    ) {
+      try {
+        normalizedResolved = await completeResolvedHierarchyFromDetectedAddress(
+          normalizedResolved,
+          normalizedResolved.formattedAddress.trim()
+        );
+      } catch (error) {
+        console.error("Failed to complete property edit reverse geocoded address", error);
       }
     }
 
@@ -625,9 +778,24 @@ export default function EditPropertyPage() {
       try {
         const resolved = await propertyAddressService.resolveAddress(payload);
         if (activeResolveRequestRef.current !== requestId) return;
-        const completedResolved = shouldResolveFromDetectedAddress
-          ? await completeResolvedHierarchyFromDetectedAddress(resolved, trimmedAddress)
-          : resolved;
+        const hydratedResolved = await ensureResolvedAddressHierarchy(resolved);
+        if (activeResolveRequestRef.current !== requestId) return;
+        const shouldCompleteFromHydratedAddress = !(
+          hydratedResolved.provinceId &&
+          hydratedResolved.districtId &&
+          hydratedResolved.communeId
+        );
+        const completionAddress = shouldResolveFromDetectedAddress
+          ? trimmedAddress
+          : shouldCompleteFromHydratedAddress
+          ? hydratedResolved.formattedAddress?.trim() ?? ""
+          : "";
+        const completedResolved = completionAddress
+          ? await completeResolvedHierarchyFromDetectedAddress(
+              hydratedResolved,
+              completionAddress
+            )
+          : hydratedResolved;
         if (activeResolveRequestRef.current !== requestId) return;
         const nextResolved =
           hasValidCoordinates && addressResolutionSourceRef.current === "coordinates"
@@ -822,6 +990,7 @@ export default function EditPropertyPage() {
                     Number(u?.buildingId) > 0 &&
                     Number(u.buildingId) === Number(b.buildingId)
                 );
+
           return {
             buildingId: b.buildingId?.toString() || "",
             buildingName: b.buildingName || `Building ${b.buildingId}`,
@@ -909,10 +1078,10 @@ export default function EditPropertyPage() {
         description: property.status === "REJECTED" 
           ? cleanRejectionReasons(property.description || "")
           : property.description || "",
-        provinceId: property.propertyAddress?.province?.code || "",
-        districtId: property.propertyAddress?.district?.code || "",
-        communeId: property.propertyAddress?.commune?.code || "",
-        villageId: property.propertyAddress?.village?.code || "",
+        provinceId: getAddressEntityCode(property.propertyAddress?.province) || "",
+        districtId: getAddressEntityCode(property.propertyAddress?.district) || "",
+        communeId: getAddressEntityCode(property.propertyAddress?.commune) || "",
+        villageId: getAddressEntityCode(property.propertyAddress?.village) || "",
         street: property.propertyAddress?.street || "",
         houseNo: property.propertyAddress?.houseNo || "",
         latitude: property.propertyLocation?.latitude?.toString() || "",
@@ -957,10 +1126,16 @@ export default function EditPropertyPage() {
 
       // Sync addressCodes state with loaded property data
       setAddressCodes({
-        provinceId: property.propertyAddress?.province?.code || null,
-        districtId: property.propertyAddress?.district?.code || null,
-        communeId: property.propertyAddress?.commune?.code || null,
-        villageId: property.propertyAddress?.village?.code || null,
+        provinceId: getAddressEntityCode(property.propertyAddress?.province),
+        districtId: getAddressEntityCode(property.propertyAddress?.district),
+        communeId: getAddressEntityCode(property.propertyAddress?.commune),
+        villageId: getAddressEntityCode(property.propertyAddress?.village),
+      });
+      setResolvedAddressItems({
+        province: toResolvedAddressItem(property.propertyAddress?.province),
+        district: toResolvedAddressItem(property.propertyAddress?.district),
+        commune: toResolvedAddressItem(property.propertyAddress?.commune),
+        village: toResolvedAddressItem(property.propertyAddress?.village),
       });
 
       // Load existing photos if available
@@ -1019,10 +1194,11 @@ export default function EditPropertyPage() {
       originalDataRef.current = {
         formData: JSON.parse(JSON.stringify(formData)),
         addressCodes: JSON.parse(JSON.stringify(addressCodes)),
+        resolvedAddressItems: JSON.parse(JSON.stringify(resolvedAddressItems)),
         photoPreview: JSON.parse(JSON.stringify(photoPreview)),
       };
     }
-  }, [formData, addressCodes, photoPreview]);
+  }, [formData, addressCodes, photoPreview, resolvedAddressItems]);
 
   const selectedPropertyType = useMemo(() => {
     const selected = propertyTypes.find(
@@ -1299,6 +1475,13 @@ export default function EditPropertyPage() {
         placeId: originalDataRef.current.formData!.placeId,
       }));
       setAddressCodes(JSON.parse(JSON.stringify(originalDataRef.current.addressCodes)));
+      setResolvedAddressItems(
+        JSON.parse(
+          JSON.stringify(
+            originalDataRef.current.resolvedAddressItems ?? EMPTY_RESOLVED_ADDRESS_ITEMS
+          )
+        )
+      );
       setShapes([]);
       setExistingPolygon(originalPolygonRef.current);
       setPolygonGeoJson(originalPolygonRef.current);
@@ -1425,10 +1608,23 @@ export default function EditPropertyPage() {
 
   const handleInputChange = (field: string, value: any) => {
     if (field === "formattedAddress") {
-      hasAddressResolutionInteractionRef.current = String(value ?? "").trim().length > 0;
-      preserveTypedDetectedAddressRef.current = String(value ?? "").trim().length > 0;
-      addressResolutionSourceRef.current = "formattedAddress";
+      const nextValue = String(value ?? "");
+      const coordinatePair = parseCoordinatePairInput(nextValue);
+
+      hasAddressResolutionInteractionRef.current = nextValue.trim().length > 0;
+      preserveTypedDetectedAddressRef.current = !coordinatePair && nextValue.trim().length > 0;
+      addressResolutionSourceRef.current = coordinatePair ? "coordinates" : "formattedAddress";
       lastResolvedAddressKeyRef.current = "";
+
+      if (coordinatePair) {
+        setFormData((prev) => ({
+          ...prev,
+          formattedAddress: nextValue,
+          latitude: coordinatePair.latitude,
+          longitude: coordinatePair.longitude,
+        }));
+        return;
+      }
     }
 
     if (field === "latitude" || field === "longitude") {
@@ -1436,6 +1632,16 @@ export default function EditPropertyPage() {
       preserveTypedDetectedAddressRef.current = false;
       addressResolutionSourceRef.current = "coordinates";
       lastResolvedAddressKeyRef.current = "";
+
+      const coordinatePair = parseCoordinatePairInput(String(value ?? ""));
+      if (coordinatePair) {
+        setFormData((prev) => ({
+          ...prev,
+          latitude: coordinatePair.latitude,
+          longitude: coordinatePair.longitude,
+        }));
+        return;
+      }
     }
 
     console.log("🔄 Input change:", field, "=", value);
@@ -2342,6 +2548,7 @@ export default function EditPropertyPage() {
             <AddressTab
               formData={formData}
               addressCodes={addressCodes}
+              resolvedAddressItems={resolvedAddressItems}
               onInputChange={handleInputChange}
               onAddressChange={handleAddressChange}
               onCoordinatesChange={handleMapCoordinatesChange}
@@ -2349,7 +2556,7 @@ export default function EditPropertyPage() {
               onShapesChange={handleShapesChange}
               shapes={shapes}
               existingPolygon={existingPolygon}
-              disableBoundaryPinUpdate={false}
+              disableBoundaryPinUpdate={true}
               enableShapeDrawing={true}
               showMap={true}
               mapHeight="700px"

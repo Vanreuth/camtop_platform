@@ -39,10 +39,27 @@ export const PropertyAddressForm: React.FC<PropertyAddressFormProps> = ({
   const t = useTranslations("properties");
   const addressLocale = useAddressLocale();
 
-  const selectedProvinceId = value.provinceId;
-  const selectedDistrictId = value.districtId;
-  const selectedCommuneId = value.communeId;
-  const selectedVillageId = value.villageId;
+  const normalizeSelectedCode = (code: string | null | undefined): string | null => {
+    const trimmed = code?.trim();
+    return trimmed ? trimmed : null;
+  };
+
+  const selectedProvinceId =
+    normalizeSelectedCode(value.provinceId) ??
+    normalizeSelectedCode(resolvedAddressItems?.province?.code) ??
+    null;
+  const selectedDistrictId =
+    normalizeSelectedCode(value.districtId) ??
+    normalizeSelectedCode(resolvedAddressItems?.district?.code) ??
+    null;
+  const selectedCommuneId =
+    normalizeSelectedCode(value.communeId) ??
+    normalizeSelectedCode(resolvedAddressItems?.commune?.code) ??
+    null;
+  const selectedVillageId =
+    normalizeSelectedCode(value.villageId) ??
+    normalizeSelectedCode(resolvedAddressItems?.village?.code) ??
+    null;
 
   const { data: provinces, isLoading: isLoadingProvinces } = useProvinces();
   const { data: districts, isLoading: isLoadingDistricts } =
@@ -59,6 +76,32 @@ export const PropertyAddressForm: React.FC<PropertyAddressFormProps> = ({
   const selectedVillage = useMemo(() => {
     return villages?.find((item) => item.code === selectedVillageId) ?? null;
   }, [villages, selectedVillageId]);
+
+  const selectedProvince = useMemo(() => {
+    return provinces?.find((item) => item.code === selectedProvinceId) ?? null;
+  }, [provinces, selectedProvinceId]);
+
+  const selectedDistrict = useMemo(() => {
+    return districts?.find((item) => item.code === selectedDistrictId) ?? null;
+  }, [districts, selectedDistrictId]);
+
+  const selectedProvinceLabel = useMemo(() => {
+    if (!selectedProvinceId) return null;
+    if (selectedProvince) return addressLocale.province(selectedProvince);
+    if (resolvedAddressItems?.province?.code === selectedProvinceId) {
+      return addressLocale.province(resolvedAddressItems.province);
+    }
+    return selectedProvinceId;
+  }, [addressLocale, resolvedAddressItems, selectedProvince, selectedProvinceId]);
+
+  const selectedDistrictLabel = useMemo(() => {
+    if (!selectedDistrictId) return null;
+    if (selectedDistrict) return addressLocale.district(selectedDistrict);
+    if (resolvedAddressItems?.district?.code === selectedDistrictId) {
+      return addressLocale.district(resolvedAddressItems.district);
+    }
+    return selectedDistrictId;
+  }, [addressLocale, resolvedAddressItems, selectedDistrict, selectedDistrictId]);
 
   const selectedCommuneLabel = useMemo(() => {
     if (!selectedCommuneId) return null;
@@ -235,6 +278,8 @@ export const PropertyAddressForm: React.FC<PropertyAddressFormProps> = ({
                   <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
                   <span>Loading...</span>
                 </div>
+              ) : selectedProvinceLabel ? (
+                <span className="truncate">{selectedProvinceLabel}</span>
               ) : (
                 <SelectValue placeholder="Select Province" />
               )}
@@ -266,6 +311,8 @@ export const PropertyAddressForm: React.FC<PropertyAddressFormProps> = ({
                   <Loader2 className="h-4 w-4 animate-spin text-yellow-600" />
                   <span>Loading...</span>
                 </div>
+              ) : selectedDistrictLabel ? (
+                <span className="truncate">{selectedDistrictLabel}</span>
               ) : (
                 <SelectValue placeholder={districtPlaceholder} />
               )}

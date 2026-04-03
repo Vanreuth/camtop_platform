@@ -150,6 +150,8 @@ const geoJsonToBounds = (geometry: any) => {
 };
 
 const GIS_TYPES = ["province", "district", "commune", "village"] as const;
+const DEFAULT_PIN_LATITUDE = 11.5564;
+const DEFAULT_PIN_LONGITUDE = 104.9282;
 
 const clearAllGis = (map: google.maps.Map, layerSigRef: React.MutableRefObject<Record<string, string>>) => {
   const rm: google.maps.Data.Feature[] = [];
@@ -591,6 +593,7 @@ const DrawingToolsUI = React.memo(function DrawingToolsUI(props: {
 export const MapLogic = ({
   initialCoords,
   addressCodes,
+  preservePinWhenInsideSelectedBoundary = false,
   onCoordinatesChange,
   onAddressCodesChange,
   onReverseGeocode,
@@ -609,6 +612,7 @@ export const MapLogic = ({
 }: {
   initialCoords: { latitude: number; longitude: number };
   addressCodes: AddressData;
+  preservePinWhenInsideSelectedBoundary?: boolean;
   onCoordinatesChange?: (coords: { latitude: number; longitude: number }) => void;
   onAddressCodesChange?: (address: AddressData) => void;
   onReverseGeocode?: (data: any) => void;
@@ -663,6 +667,19 @@ export const MapLogic = ({
     if (map) {
       map.panTo({ lat: initialCoords.latitude, lng: initialCoords.longitude });
 
+      const hasSelectedAddress =
+        Boolean(addressCodes.provinceId) ||
+        Boolean(addressCodes.districtId) ||
+        Boolean(addressCodes.communeId) ||
+        Boolean(addressCodes.villageId);
+      const isDefaultPin =
+        Math.abs(initialCoords.latitude - DEFAULT_PIN_LATITUDE) <= 0.000001 &&
+        Math.abs(initialCoords.longitude - DEFAULT_PIN_LONGITUDE) <= 0.000001;
+
+      if (!hasSelectedAddress && !isDefaultPin && (map.getZoom() ?? 0) < 16) {
+        map.setZoom(16);
+      }
+
       if (legacyMarkerRef.current) {
         legacyMarkerRef.current.setPosition({
           lat: initialCoords.latitude,
@@ -670,7 +687,17 @@ export const MapLogic = ({
         });
       }
     }
-  }, [initialCoords.latitude, initialCoords.longitude, currentCoords.latitude, currentCoords.longitude, map]);
+  }, [
+    addressCodes.communeId,
+    addressCodes.districtId,
+    addressCodes.provinceId,
+    addressCodes.villageId,
+    currentCoords.latitude,
+    currentCoords.longitude,
+    initialCoords.latitude,
+    initialCoords.longitude,
+    map,
+  ]);
 
   // Map type: controlled or local
   const [localMapType, setLocalMapType] = useState<"roadmap" | "satellite" | "hybrid" | "terrain">("roadmap");
@@ -973,6 +1000,7 @@ const renderLayer = useCallback(
       const currentPos = new google.maps.LatLng(markerPos.lat, markerPos.lng);
       const isPinInside = bounds.contains(currentPos);
       if (userManuallyPlacedPin.current && isPinInside) return true;
+      if (preservePinWhenInsideSelectedBoundary && isPinInside) return true;
 
       if (!userManuallyPlacedPin.current) map.fitBounds(bounds);
 
@@ -984,7 +1012,14 @@ const renderLayer = useCallback(
 
       return true;
     },
-    [map, markerPos.lat, markerPos.lng, disableBoundaryPinUpdateRef, handleManualLocationUpdateRef]
+    [
+      map,
+      markerPos.lat,
+      markerPos.lng,
+      disableBoundaryPinUpdateRef,
+      handleManualLocationUpdateRef,
+      preservePinWhenInsideSelectedBoundary,
+    ]
   );
 
   /**

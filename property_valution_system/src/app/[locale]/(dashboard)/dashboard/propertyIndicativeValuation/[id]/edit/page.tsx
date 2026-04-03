@@ -56,9 +56,13 @@ import { convertShapesToGeoJson, logPolygonInfo } from "@/utils/geoJsonConverter
 import { PREPARED_FOR_OPTIONS } from "@/constants/preparedForOptions";
 import { propertyAddressService } from "@/hooks/propertyAddress/propertyAddress.service";
 import {
+  ensureResolvedAddressHierarchy,
+  getAddressEntityCode,
+  toResolvedAddressItem,
   completeResolvedHierarchyFromDetectedAddress,
   type ResolvedAddressDraft,
 } from "@/utils/propertyAddressResolution";
+import type { ResolvedAddressHierarchyItems } from "@/types/propertyAddress.types";
 import {
   Building2,
   ClipboardList,
@@ -89,6 +93,52 @@ const PROPERTY_VALUATION_STATUS = [
 
 const DEFAULT_ADDRESS_LATITUDE = 11.5564;
 const DEFAULT_ADDRESS_LONGITUDE = 104.9282;
+const EMPTY_RESOLVED_ADDRESS_ITEMS: ResolvedAddressHierarchyItems = {
+  province: null,
+  district: null,
+  commune: null,
+  village: null,
+};
+
+const pickFirstNonEmpty = (...values: Array<string | null | undefined>): string | null => {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+
+  return null;
+};
+
+const parseCoordinatePairInput = (
+  value: string
+): { latitude: string; longitude: string } | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(
+    /^\s*(-?\d+(?:\.\d+)?)\s*[,/\s]+\s*(-?\d+(?:\.\d+)?)\s*$/u
+  );
+  if (!match) return null;
+
+  const latitude = Number.parseFloat(match[1]);
+  const longitude = Number.parseFloat(match[2]);
+
+  if (
+    !Number.isFinite(latitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    !Number.isFinite(longitude) ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return null;
+  }
+
+  return {
+    latitude: latitude.toFixed(6),
+    longitude: longitude.toFixed(6),
+  };
+};
 const INTENDED_USE_VALUES = [
   "MORTGAGE_LOAN",
   "SALE_PURCHASE",
@@ -363,10 +413,17 @@ const defaultNewPropertyDraft = (): NewPropertyDraft => ({
 });
 
 const getAddressCodeValue = (
-  nested?: { code?: string | null } | null,
+  nested?: {
+    code?: string | number | null;
+    provinceId?: string | number | null;
+    districtId?: string | number | null;
+    communeId?: string | number | null;
+    villageId?: string | number | null;
+  } | null,
   fallback?: string | number | null,
 ) => {
-  if (nested?.code) return String(nested.code);
+  const nestedCode = getAddressEntityCode(nested);
+  if (nestedCode) return nestedCode;
   if (fallback !== undefined && fallback !== null && fallback !== "") {
     return String(fallback);
   }
@@ -444,6 +501,8 @@ export default function EditPropertyIndicativeValuationPage() {
   const [shapes, setShapes] = useState<DrawnShape[]>([]);
   const [polygonGeoJson, setPolygonGeoJson] = useState<GeoJsonPolygon | null>(null);
   const [addressCodes, setAddressCodes] = useState<AddressCodes>(DEFAULT_ADDRESS_CODES);
+  const [resolvedAddressItems, setResolvedAddressItems] =
+    useState<ResolvedAddressHierarchyItems>(EMPTY_RESOLVED_ADDRESS_ITEMS);
   const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
   const hadPolygonDrawnRef = useRef(false);
   const lastResolvedAddressKeyRef = useRef("");
@@ -549,6 +608,12 @@ export default function EditPropertyIndicativeValuationPage() {
       communeId: nextProperty.communeId || null,
       villageId: nextProperty.villageId || null,
     });
+    setResolvedAddressItems({
+      province: toResolvedAddressItem(valuation.property?.propertyAddress?.province),
+      district: toResolvedAddressItem(valuation.property?.propertyAddress?.district),
+      commune: toResolvedAddressItem(valuation.property?.propertyAddress?.commune),
+      village: toResolvedAddressItem(valuation.property?.propertyAddress?.village),
+    });
   }, [form, normalizedInitialInstructedBy, normalizedInitialIntendedUse, user?.id, valuation]);
 
   useEffect(() => {
@@ -648,17 +713,75 @@ export default function EditPropertyIndicativeValuationPage() {
     normalizeSelectValue(intendedUseValue) || normalizedInitialIntendedUse || "__none";
 
   useEffect(() => {
-    setAddressCodes({
-      provinceId: newProperty.provinceId || null,
-      districtId: newProperty.districtId || null,
-      communeId: newProperty.communeId || null,
-      villageId: newProperty.villageId || null,
+    const nextCodes: AddressCodes = {
+      provinceId: pickFirstNonEmpty(
+        newProperty.provinceId,
+        addressCodes.provinceId,
+        resolvedAddressItems.province?.code
+      ),
+      districtId: pickFirstNonEmpty(
+        newProperty.districtId,
+        addressCodes.districtId,
+        resolvedAddressItems.district?.code
+      ),
+      communeId: pickFirstNonEmpty(
+        newProperty.communeId,
+        addressCodes.communeId,
+        resolvedAddressItems.commune?.code
+      ),
+      villageId: pickFirstNonEmpty(
+        newProperty.villageId,
+        addressCodes.villageId,
+        resolvedAddressItems.village?.code
+      ),
+    };
+
+    setAddressCodes((prev) => {
+      if (
+        prev.provinceId === nextCodes.provinceId &&
+        prev.districtId === nextCodes.districtId &&
+        prev.communeId === nextCodes.communeId &&
+        prev.villageId === nextCodes.villageId
+      ) {
+        return prev;
+      }
+
+      return nextCodes;
+    });
+
+    setNewProperty((prev) => {
+      const nextProperty = {
+        ...prev,
+        provinceId: pickFirstNonEmpty(prev.provinceId, nextCodes.provinceId) ?? "",
+        districtId: pickFirstNonEmpty(prev.districtId, nextCodes.districtId) ?? "",
+        communeId: pickFirstNonEmpty(prev.communeId, nextCodes.communeId) ?? "",
+        villageId: pickFirstNonEmpty(prev.villageId, nextCodes.villageId) ?? "",
+      };
+
+      if (
+        nextProperty.provinceId === prev.provinceId &&
+        nextProperty.districtId === prev.districtId &&
+        nextProperty.communeId === prev.communeId &&
+        nextProperty.villageId === prev.villageId
+      ) {
+        return prev;
+      }
+
+      return nextProperty;
     });
   }, [
+    addressCodes.communeId,
+    addressCodes.districtId,
+    addressCodes.provinceId,
+    addressCodes.villageId,
     newProperty.communeId,
     newProperty.districtId,
     newProperty.provinceId,
     newProperty.villageId,
+    resolvedAddressItems.commune?.code,
+    resolvedAddressItems.district?.code,
+    resolvedAddressItems.province?.code,
+    resolvedAddressItems.village?.code,
   ]);
 
   const selectedValuer = valuers.find((valuer) => String(valuer.id) === valuerIdValue);
@@ -752,10 +875,23 @@ export default function EditPropertyIndicativeValuationPage() {
   const handleAddressInputChange = useCallback(
     (field: string, value: string) => {
       if (field === "formattedAddress") {
-        hasAddressResolutionInteractionRef.current = String(value ?? "").trim().length > 0;
-        preserveTypedDetectedAddressRef.current = String(value ?? "").trim().length > 0;
-        addressResolutionSourceRef.current = "formattedAddress";
+        const nextValue = String(value ?? "");
+        const coordinatePair = parseCoordinatePairInput(nextValue);
+
+        hasAddressResolutionInteractionRef.current = nextValue.trim().length > 0;
+        preserveTypedDetectedAddressRef.current = !coordinatePair && nextValue.trim().length > 0;
+        addressResolutionSourceRef.current = coordinatePair ? "coordinates" : "formattedAddress";
         lastResolvedAddressKeyRef.current = "";
+
+        if (coordinatePair) {
+          setNewProperty((prev) => ({
+            ...prev,
+            formattedAddress: nextValue,
+            latitude: coordinatePair.latitude,
+            longitude: coordinatePair.longitude,
+          }));
+          return;
+        }
       }
 
       if (field === "latitude" || field === "longitude") {
@@ -763,6 +899,16 @@ export default function EditPropertyIndicativeValuationPage() {
         preserveTypedDetectedAddressRef.current = false;
         addressResolutionSourceRef.current = "coordinates";
         lastResolvedAddressKeyRef.current = "";
+
+        const coordinatePair = parseCoordinatePairInput(String(value ?? ""));
+        if (coordinatePair) {
+          setNewProperty((prev) => ({
+            ...prev,
+            latitude: coordinatePair.latitude,
+            longitude: coordinatePair.longitude,
+          }));
+          return;
+        }
       }
 
       updateNewProperty(field as keyof NewPropertyDraft, value);
@@ -779,6 +925,7 @@ export default function EditPropertyIndicativeValuationPage() {
       villageId: codes.villageId ?? "",
     }));
     setAddressCodes(codes);
+    setResolvedAddressItems(EMPTY_RESOLVED_ADDRESS_ITEMS);
   }, []);
 
   const handleMapCoordinatesChange = useCallback((coords: { latitude: number; longitude: number }) => {
@@ -787,8 +934,8 @@ export default function EditPropertyIndicativeValuationPage() {
     addressResolutionSourceRef.current = "coordinates";
     setNewProperty((prev) => ({
       ...prev,
-      latitude: String(coords.latitude),
-      longitude: String(coords.longitude),
+      latitude: coords.latitude.toFixed(6),
+      longitude: coords.longitude.toFixed(6),
     }));
   }, []);
 
@@ -805,8 +952,8 @@ export default function EditPropertyIndicativeValuationPage() {
         if (center) {
           setNewProperty((prev) => ({
             ...prev,
-            latitude: String(center.latitude),
-            longitude: String(center.longitude),
+            latitude: center.latitude.toFixed(6),
+            longitude: center.longitude.toFixed(6),
           }));
         }
       }
@@ -875,6 +1022,12 @@ export default function EditPropertyIndicativeValuationPage() {
         districtId: resolved.districtId ?? null,
         communeId: resolved.communeId ?? null,
         villageId: resolved.villageId ?? null,
+      });
+      setResolvedAddressItems({
+        province: resolved.province ?? null,
+        district: resolved.district ?? null,
+        commune: resolved.commune ?? null,
+        village: resolved.village ?? null,
       });
     }
   }, []);
@@ -981,6 +1134,14 @@ export default function EditPropertyIndicativeValuationPage() {
         }
       }
 
+      normalizedResolved = await ensureResolvedAddressHierarchy(normalizedResolved);
+
+      const shouldCompleteFromResolvedAddress = !(
+        normalizedResolved.provinceId &&
+        normalizedResolved.districtId &&
+        normalizedResolved.communeId
+      );
+
       if (shouldPreferTypedDetectedAddress) {
         normalizedResolved = await completeResolvedHierarchyFromDetectedAddress(
           {
@@ -988,6 +1149,14 @@ export default function EditPropertyIndicativeValuationPage() {
             formattedAddress: typedDetectedAddress,
           },
           typedDetectedAddress
+        );
+      } else if (
+        shouldCompleteFromResolvedAddress &&
+        normalizedResolved.formattedAddress?.trim()
+      ) {
+        normalizedResolved = await completeResolvedHierarchyFromDetectedAddress(
+          normalizedResolved,
+          normalizedResolved.formattedAddress.trim()
         );
       }
 
@@ -1078,9 +1247,24 @@ export default function EditPropertyIndicativeValuationPage() {
       try {
         const resolved = await propertyAddressService.resolveAddress(payload);
         if (activeResolveRequestRef.current !== requestId) return;
-        const completedResolved = shouldResolveFromDetectedAddress
-          ? await completeResolvedHierarchyFromDetectedAddress(resolved, trimmedAddress)
-          : resolved;
+        const hydratedResolved = await ensureResolvedAddressHierarchy(resolved);
+        if (activeResolveRequestRef.current !== requestId) return;
+        const shouldCompleteFromHydratedAddress = !(
+          hydratedResolved.provinceId &&
+          hydratedResolved.districtId &&
+          hydratedResolved.communeId
+        );
+        const completionAddress = shouldResolveFromDetectedAddress
+          ? trimmedAddress
+          : shouldCompleteFromHydratedAddress
+          ? hydratedResolved.formattedAddress?.trim() ?? ""
+          : "";
+        const completedResolved = completionAddress
+          ? await completeResolvedHierarchyFromDetectedAddress(
+              hydratedResolved,
+              completionAddress
+            )
+          : hydratedResolved;
         if (activeResolveRequestRef.current !== requestId) return;
         const nextResolved =
           hasValidCoordinates && addressResolutionSourceRef.current === "coordinates"
@@ -1138,6 +1322,7 @@ export default function EditPropertyIndicativeValuationPage() {
     setPolygonGeoJson(null);
     hadPolygonDrawnRef.current = false;
     setAddressCodes(DEFAULT_ADDRESS_CODES);
+    setResolvedAddressItems(EMPTY_RESOLVED_ADDRESS_ITEMS);
     setIsReverseGeocoding(false);
     lastResolvedAddressKeyRef.current = "";
     activeResolveRequestRef.current = 0;
@@ -1659,6 +1844,7 @@ export default function EditPropertyIndicativeValuationPage() {
                       formattedAddress: newProperty.formattedAddress,
                     }}
                     addressCodes={addressCodes}
+                    resolvedAddressItems={resolvedAddressItems}
                     onInputChange={handleAddressInputChange}
                     onAddressChange={handleAddressChange}
                     onCoordinatesChange={handleMapCoordinatesChange}

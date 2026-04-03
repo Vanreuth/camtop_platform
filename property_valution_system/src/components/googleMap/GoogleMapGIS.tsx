@@ -8,6 +8,7 @@ import { MapLogic } from "@/components/googleMap/mapLogic";
 export const GoogleMapGIS = ({
   coordinates = { latitude: 11.5564, longitude: 104.9282 },
   addressCodes,
+  preservePinWhenInsideSelectedBoundary = false,
   onCoordinatesChange,
   onAddressCodesChange,
   onReverseGeocode,
@@ -176,6 +177,7 @@ export const GoogleMapGIS = ({
           <MapLogic
             initialCoords={coordinates}
             addressCodes={addressCodes}
+            preservePinWhenInsideSelectedBoundary={preservePinWhenInsideSelectedBoundary}
             onCoordinatesChange={onCoordinatesChange}
             onAddressCodesChange={onAddressCodesChange}
             onReverseGeocode={onReverseGeocode}

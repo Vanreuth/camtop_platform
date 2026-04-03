@@ -71,9 +71,11 @@ import { getErrorMessage } from "@/lib/utils";
 import { PREPARED_FOR_OPTIONS } from "@/constants/preparedForOptions";
 import { propertyAddressService } from "@/hooks/propertyAddress/propertyAddress.service";
 import {
+  ensureResolvedAddressHierarchy,
   completeResolvedHierarchyFromDetectedAddress,
   type ResolvedAddressDraft,
 } from "@/utils/propertyAddressResolution";
+import type { ResolvedAddressHierarchyItems } from "@/types/propertyAddress.types";
 
 // ============================================
 // ✅ CONSTANTS
@@ -96,6 +98,21 @@ const PROPERTY_VALUATION_STATUS = [
 
 const DEFAULT_ADDRESS_LATITUDE = 11.5564;
 const DEFAULT_ADDRESS_LONGITUDE = 104.9282;
+const EMPTY_RESOLVED_ADDRESS_ITEMS: ResolvedAddressHierarchyItems = {
+  province: null,
+  district: null,
+  commune: null,
+  village: null,
+};
+
+const pickFirstNonEmpty = (...values: Array<string | null | undefined>): string | null => {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+
+  return null;
+};
 
 // Validate date string format and value (must be before schema)
 const isValidDateString = (value?: string | Date): boolean => {
@@ -228,6 +245,37 @@ const parseIntegerInput = (value: string) => {
   if (value.trim() === "") return undefined;
   const n = Number.parseInt(value, 10);
   return Number.isFinite(n) ? n : undefined;
+};
+
+const parseCoordinatePairInput = (
+  value: string
+): { latitude: number; longitude: number } | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(
+    /^\s*(-?\d+(?:\.\d+)?)\s*[,/\s]+\s*(-?\d+(?:\.\d+)?)\s*$/u
+  );
+  if (!match) return null;
+
+  const latitude = Number.parseFloat(match[1]);
+  const longitude = Number.parseFloat(match[2]);
+
+  if (
+    !Number.isFinite(latitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    !Number.isFinite(longitude) ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return null;
+  }
+
+  return {
+    latitude: Number.parseFloat(latitude.toFixed(6)),
+    longitude: Number.parseFloat(longitude.toFixed(6)),
+  };
 };
 
 const trimValue = (value?: string) => {
@@ -494,6 +542,8 @@ export default function AddPropertyValuationPage() {
   const [shapes, setShapes] = useState<DrawnShape[]>([]);
   const [polygonGeoJson, setPolygonGeoJson] = useState<GeoJsonPolygon | null>(null);
   const [addressCodes, setAddressCodes] = useState<AddressCodes>(DEFAULT_ADDRESS_CODES);
+  const [resolvedAddressItems, setResolvedAddressItems] =
+    useState<ResolvedAddressHierarchyItems>(EMPTY_RESOLVED_ADDRESS_ITEMS);
   const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
   const hadPolygonDrawnRef = useRef(false);
   const lastResolvedAddressKeyRef = useRef("");
@@ -615,23 +665,23 @@ export default function AddPropertyValuationPage() {
     }
   }, [form, selectedPropertyTypeId]);
 
-  // Sync addressCodes with form values
-  useEffect(() => {
-    setAddressCodes({
-      provinceId: form.watch("provinceId") || null,
-      districtId: form.watch("districtId") || null,
-      communeId: form.watch("communeId") || null,
-      villageId: form.watch("villageId") || null,
-    });
-  }, [form.watch("provinceId"), form.watch("districtId"), form.watch("communeId"), form.watch("villageId")]);
-
   // Address handlers for AddressTab
   const handleInputChange = useCallback((field: string, value: string) => {
     if (field === "formattedAddress") {
-      hasAddressResolutionInteractionRef.current = String(value ?? "").trim().length > 0;
-      preserveTypedDetectedAddressRef.current = String(value ?? "").trim().length > 0;
-      addressResolutionSourceRef.current = "formattedAddress";
+      const nextValue = String(value ?? "");
+      const coordinatePair = parseCoordinatePairInput(nextValue);
+
+      hasAddressResolutionInteractionRef.current = nextValue.trim().length > 0;
+      preserveTypedDetectedAddressRef.current = !coordinatePair && nextValue.trim().length > 0;
+      addressResolutionSourceRef.current = coordinatePair ? "coordinates" : "formattedAddress";
       lastResolvedAddressKeyRef.current = "";
+
+      if (coordinatePair) {
+        form.setValue("formattedAddress", nextValue);
+        form.setValue("latitude", coordinatePair.latitude);
+        form.setValue("longitude", coordinatePair.longitude);
+        return;
+      }
     }
 
     if (field === "latitude" || field === "longitude") {
@@ -639,6 +689,13 @@ export default function AddPropertyValuationPage() {
       preserveTypedDetectedAddressRef.current = false;
       addressResolutionSourceRef.current = "coordinates";
       lastResolvedAddressKeyRef.current = "";
+
+      const coordinatePair = parseCoordinatePairInput(String(value ?? ""));
+      if (coordinatePair) {
+        form.setValue("latitude", coordinatePair.latitude);
+        form.setValue("longitude", coordinatePair.longitude);
+        return;
+      }
     }
 
     form.setValue(field as any, value);
@@ -650,29 +707,30 @@ export default function AddPropertyValuationPage() {
     form.setValue("communeId", codes.communeId ?? "");
     form.setValue("villageId", codes.villageId ?? "");
     setAddressCodes(codes);
+    setResolvedAddressItems(EMPTY_RESOLVED_ADDRESS_ITEMS);
   }, [form]);
 
   const handleMapCoordinatesChange = useCallback((coords: { latitude: number; longitude: number }) => {
     hasAddressResolutionInteractionRef.current = true;
     preserveTypedDetectedAddressRef.current = false;
     addressResolutionSourceRef.current = "coordinates";
-    form.setValue("latitude", coords.latitude);
-    form.setValue("longitude", coords.longitude);
+    form.setValue("latitude", Number.parseFloat(coords.latitude.toFixed(6)));
+    form.setValue("longitude", Number.parseFloat(coords.longitude.toFixed(6)));
   }, [form]);
 
  const handleShapesChange = useCallback((newShapes: DrawnShape[]) => {
   setShapes(newShapes);
 
   if (newShapes.length > 0) {
-    const geoJson = convertShapesToGeoJson(newShapes);
+      const geoJson = convertShapesToGeoJson(newShapes);
     if (geoJson) {
       logPolygonInfo(geoJson, "Shape Changed");
       setPolygonGeoJson(geoJson);
       hadPolygonDrawnRef.current = true;
       const center = getPolygonCenter(geoJson);
       if (center) {
-        form.setValue("latitude", center.latitude);
-        form.setValue("longitude", center.longitude);
+        form.setValue("latitude", Number.parseFloat(center.latitude.toFixed(6)));
+        form.setValue("longitude", Number.parseFloat(center.longitude.toFixed(6)));
       }
     }
     return;
@@ -720,8 +778,8 @@ export default function AddPropertyValuationPage() {
     }
 
     if (centerLat !== null && centerLng !== null) {
-      form.setValue("latitude", centerLat);
-      form.setValue("longitude", centerLng);
+      form.setValue("latitude", Number.parseFloat(centerLat.toFixed(6)));
+      form.setValue("longitude", Number.parseFloat(centerLng.toFixed(6)));
     }
   }, [form, shapes]);
 
@@ -760,13 +818,17 @@ export default function AddPropertyValuationPage() {
     if (resolved.latitude != null) {
       form.setValue(
         "latitude",
-        shouldPreserveManualCoordinates ? currentLatitude : resolved.latitude
+        shouldPreserveManualCoordinates
+          ? currentLatitude
+          : Number.parseFloat(resolved.latitude.toFixed(6))
       );
     }
     if (resolved.longitude != null) {
       form.setValue(
         "longitude",
-        shouldPreserveManualCoordinates ? currentLongitude : resolved.longitude
+        shouldPreserveManualCoordinates
+          ? currentLongitude
+          : Number.parseFloat(resolved.longitude.toFixed(6))
       );
     }
     if (
@@ -788,12 +850,91 @@ export default function AddPropertyValuationPage() {
         villageId: resolved.villageId ?? null,
       };
       setAddressCodes(nextCodes);
+      setResolvedAddressItems({
+        province: resolved.province ?? null,
+        district: resolved.district ?? null,
+        commune: resolved.commune ?? null,
+        village: resolved.village ?? null,
+      });
       form.setValue("provinceId", nextCodes.provinceId ?? "");
       form.setValue("districtId", nextCodes.districtId ?? "");
       form.setValue("communeId", nextCodes.communeId ?? "");
       form.setValue("villageId", nextCodes.villageId ?? "");
     }
   }, [form]);
+
+  const watchedProvinceId = form.watch("provinceId") ?? "";
+  const watchedDistrictId = form.watch("districtId") ?? "";
+  const watchedCommuneId = form.watch("communeId") ?? "";
+  const watchedVillageId = form.watch("villageId") ?? "";
+
+  useEffect(() => {
+    const nextCodes: AddressCodes = {
+      provinceId: pickFirstNonEmpty(
+        watchedProvinceId,
+        addressCodes.provinceId,
+        resolvedAddressItems.province?.code
+      ),
+      districtId: pickFirstNonEmpty(
+        watchedDistrictId,
+        addressCodes.districtId,
+        resolvedAddressItems.district?.code
+      ),
+      communeId: pickFirstNonEmpty(
+        watchedCommuneId,
+        addressCodes.communeId,
+        resolvedAddressItems.commune?.code
+      ),
+      villageId: pickFirstNonEmpty(
+        watchedVillageId,
+        addressCodes.villageId,
+        resolvedAddressItems.village?.code
+      ),
+    };
+
+    setAddressCodes((prev) => {
+      if (
+        prev.provinceId === nextCodes.provinceId &&
+        prev.districtId === nextCodes.districtId &&
+        prev.communeId === nextCodes.communeId &&
+        prev.villageId === nextCodes.villageId
+      ) {
+        return prev;
+      }
+
+      return nextCodes;
+    });
+
+    if ((form.getValues("provinceId") ?? "") !== (nextCodes.provinceId ?? "")) {
+      form.setValue("provinceId", nextCodes.provinceId ?? "");
+    }
+
+    if ((form.getValues("districtId") ?? "") !== (nextCodes.districtId ?? "")) {
+      form.setValue("districtId", nextCodes.districtId ?? "");
+    }
+
+    if ((form.getValues("communeId") ?? "") !== (nextCodes.communeId ?? "")) {
+      form.setValue("communeId", nextCodes.communeId ?? "");
+    }
+
+    if ((form.getValues("villageId") ?? "") !== (nextCodes.villageId ?? "")) {
+      form.setValue("villageId", nextCodes.villageId ?? "");
+    }
+  }, [
+    addressCodes.communeId,
+    addressCodes.districtId,
+    addressCodes.provinceId,
+    addressCodes.villageId,
+    form,
+    resolvedAddressItems.commune?.code,
+    resolvedAddressItems.district?.code,
+    resolvedAddressItems.province?.code,
+    resolvedAddressItems.village?.code,
+    watchedCommuneId,
+    watchedDistrictId,
+    watchedProvinceId,
+    watchedVillageId,
+  ]);
 
   const handleReverseGeocode = useCallback(async (data: any) => {
     try {
@@ -906,6 +1047,14 @@ export default function AddPropertyValuationPage() {
         }
       }
 
+      normalizedResolved = await ensureResolvedAddressHierarchy(normalizedResolved);
+
+      const shouldCompleteFromResolvedAddress = !(
+        normalizedResolved.provinceId &&
+        normalizedResolved.districtId &&
+        normalizedResolved.communeId
+      );
+
       if (shouldPreferTypedDetectedAddress) {
         normalizedResolved = await completeResolvedHierarchyFromDetectedAddress(
           {
@@ -913,6 +1062,14 @@ export default function AddPropertyValuationPage() {
             formattedAddress: typedDetectedAddress,
           },
           typedDetectedAddress
+        );
+      } else if (
+        shouldCompleteFromResolvedAddress &&
+        normalizedResolved.formattedAddress?.trim()
+      ) {
+        normalizedResolved = await completeResolvedHierarchyFromDetectedAddress(
+          normalizedResolved,
+          normalizedResolved.formattedAddress.trim()
         );
       }
 
@@ -1007,9 +1164,24 @@ export default function AddPropertyValuationPage() {
       try {
         const resolved = await propertyAddressService.resolveAddress(payload);
         if (activeResolveRequestRef.current !== requestId) return;
-        const completedResolved = shouldResolveFromDetectedAddress
-          ? await completeResolvedHierarchyFromDetectedAddress(resolved, trimmedAddress)
-          : resolved;
+        const hydratedResolved = await ensureResolvedAddressHierarchy(resolved);
+        if (activeResolveRequestRef.current !== requestId) return;
+        const shouldCompleteFromHydratedAddress = !(
+          hydratedResolved.provinceId &&
+          hydratedResolved.districtId &&
+          hydratedResolved.communeId
+        );
+        const completionAddress = shouldResolveFromDetectedAddress
+          ? trimmedAddress
+          : shouldCompleteFromHydratedAddress
+          ? hydratedResolved.formattedAddress?.trim() ?? ""
+          : "";
+        const completedResolved = completionAddress
+          ? await completeResolvedHierarchyFromDetectedAddress(
+              hydratedResolved,
+              completionAddress
+            )
+          : hydratedResolved;
         if (activeResolveRequestRef.current !== requestId) return;
         const nextResolved =
           hasValidCoordinates && addressResolutionSourceRef.current === "coordinates"
@@ -1065,6 +1237,7 @@ export default function AddPropertyValuationPage() {
     setPolygonGeoJson(null);
     hadPolygonDrawnRef.current = false;
     setAddressCodes(DEFAULT_ADDRESS_CODES);
+    setResolvedAddressItems(EMPTY_RESOLVED_ADDRESS_ITEMS);
     setIsReverseGeocoding(false);
     lastResolvedAddressKeyRef.current = "";
     activeResolveRequestRef.current = 0;
@@ -1129,6 +1302,7 @@ export default function AddPropertyValuationPage() {
             setPolygonGeoJson(null);
             hadPolygonDrawnRef.current = false;
             setAddressCodes(DEFAULT_ADDRESS_CODES);
+            setResolvedAddressItems(EMPTY_RESOLVED_ADDRESS_ITEMS);
           }
 
           if (tab === "introduction") {
@@ -1238,20 +1412,20 @@ export default function AddPropertyValuationPage() {
 
   // Prepare formData for AddressTab
   const addressTabFormData = useMemo(() => ({
-    provinceId: form.watch("provinceId") ?? "",
-    districtId: form.watch("districtId") ?? "",
-    communeId: form.watch("communeId") ?? "",
-    villageId: form.watch("villageId") ?? "",
+    provinceId: watchedProvinceId,
+    districtId: watchedDistrictId,
+    communeId: watchedCommuneId,
+    villageId: watchedVillageId,
     street: form.watch("street") ?? "",
     houseNo: form.watch("houseNo") ?? "",
     latitude: form.watch("latitude")?.toString() ?? "",
     longitude: form.watch("longitude")?.toString() ?? "",
     formattedAddress: form.watch("formattedAddress") ?? "",
   }), [
-    form.watch("provinceId"),
-    form.watch("districtId"),
-    form.watch("communeId"),
-    form.watch("villageId"),
+    watchedProvinceId,
+    watchedDistrictId,
+    watchedCommuneId,
+    watchedVillageId,
     form.watch("street"),
     form.watch("houseNo"),
     form.watch("latitude"),
@@ -1314,6 +1488,7 @@ export default function AddPropertyValuationPage() {
                   <AddressTab
                     formData={addressTabFormData}
                     addressCodes={addressCodes}
+                    resolvedAddressItems={resolvedAddressItems}
                     onInputChange={handleInputChange}
                     onAddressChange={handleAddressChange}
                     onCoordinatesChange={handleMapCoordinatesChange}

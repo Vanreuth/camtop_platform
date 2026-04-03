@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { PropertyAddressService } from "./propertyAddress.service";
+import { logger } from "../../config/logger";
 
 const service = new PropertyAddressService();
 
@@ -58,6 +59,30 @@ export class PropertyAddressController {
 
 	static async resolveAddress(req: Request, res: Response) {
 		const data = await service.resolveAddress(req.body);
+		logger.info(
+			{
+				input: {
+					latitude: req.body?.latitude ?? null,
+					longitude: req.body?.longitude ?? null,
+					formattedAddress: req.body?.formattedAddress ?? null,
+				},
+				resolved: {
+					latitude: data.latitude,
+					longitude: data.longitude,
+					formattedAddress: data.formattedAddress,
+					resolvedFormattedAddress: data.resolvedFormattedAddress,
+					provinceId: data.provinceId,
+					districtId: data.districtId,
+					communeId: data.communeId,
+					villageId: data.villageId,
+					province: data.province?.nameEn ?? null,
+					district: data.district?.nameEn ?? null,
+					commune: data.commune?.nameEn ?? null,
+					village: data.village?.nameEn ?? null,
+				},
+			},
+			"Resolved property address"
+		);
 		res.status(200).json({
 			status: "success",
 			message: "Resolve property address successfully",

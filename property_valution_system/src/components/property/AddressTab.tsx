@@ -180,6 +180,31 @@ export const AddressTab: React.FC<AddressTabProps> = ({
   );
 
   const shouldShowLoading = isReverseGeocoding;
+  const effectiveAddressCodes = useMemo(
+    () => {
+      const normalizeCode = (code: string | null | undefined) => {
+        const trimmed = code?.trim();
+        return trimmed ? trimmed : null;
+      };
+
+      return {
+        provinceId: normalizeCode(addressCodes.provinceId) ?? normalizeCode(formData.provinceId),
+        districtId: normalizeCode(addressCodes.districtId) ?? normalizeCode(formData.districtId),
+        communeId: normalizeCode(addressCodes.communeId) ?? normalizeCode(formData.communeId),
+        villageId: normalizeCode(addressCodes.villageId) ?? normalizeCode(formData.villageId),
+      };
+    },
+    [
+      addressCodes.communeId,
+      addressCodes.districtId,
+      addressCodes.provinceId,
+      addressCodes.villageId,
+      formData.communeId,
+      formData.districtId,
+      formData.provinceId,
+      formData.villageId,
+    ]
+  );
 
   return (
     <Card className="shadow-lg">
@@ -220,7 +245,7 @@ export const AddressTab: React.FC<AddressTabProps> = ({
             <h3 className="text-sm font-semibold text-slate-700">{t("areaSelection")}</h3>
           </div>
           <PropertyAddressForm
-            value={addressCodes}
+            value={effectiveAddressCodes}
             resolvedAddressItems={resolvedAddressItems}
             onAddressChange={onAddressChange}
           />
@@ -286,7 +311,8 @@ export const AddressTab: React.FC<AddressTabProps> = ({
               <div className="rounded-lg overflow-hidden border-2 border-slate-200">
                 <GoogleMapGIS
                   coordinates={coordinates}
-                  addressCodes={addressCodes}
+                  addressCodes={effectiveAddressCodes}
+                  preservePinWhenInsideSelectedBoundary={coordinates.isValid}
                   onCoordinatesChange={onCoordinatesChange}
                   onAddressCodesChange={onAddressChange}
                   onReverseGeocode={onReverseGeocode}
@@ -448,7 +474,7 @@ export const AddressTab: React.FC<AddressTabProps> = ({
                 <Textarea
                   value={formData.formattedAddress}
                   onChange={(e) => handleFieldChange("formattedAddress", e.target.value)}
-                  placeholder="Paste a detected address or let the map fill it automatically."
+                  placeholder="Paste a detected address, or paste coordinates like 11.52978335405926, 104.96855134963224."
                   className={cn(
                     "min-h-[96px] resize-y text-sm",
                     formData.formattedAddress
@@ -457,8 +483,8 @@ export const AddressTab: React.FC<AddressTabProps> = ({
                   )}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Enter latitude and longitude, click the map, or paste a detected address to auto-fill the
-                  province, district, commune, and village flow.
+                  Enter latitude and longitude, click the map, or paste a coordinate pair to auto-fill latitude,
+                  longitude, and then resolve the province, district, commune, and village flow.
                 </p>
               </div>
             </div>

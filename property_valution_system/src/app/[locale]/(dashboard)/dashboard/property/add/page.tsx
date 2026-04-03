@@ -52,12 +52,12 @@ import { normalizePhysicalCondition } from "@/utils/physicalCondition";
 import { toConstructionPercentageNumber } from "@/utils/constructionPercentage";
 import { normalizeTransactionType } from "@/constants/transactionOptions";
 import { propertyAddressService } from "@/hooks/propertyAddress/propertyAddress.service";
-import type {
-  ResolvedAddressHierarchyItems,
-  ResolvedAddressItem,
-  Commune,
-  Village,
-} from "@/types/propertyAddress.types";
+import {
+  ensureResolvedAddressHierarchy,
+  completeResolvedHierarchyFromDetectedAddress as completeResolvedHierarchyFromDetectedAddressShared,
+  type ResolvedAddressDraft,
+} from "@/utils/propertyAddressResolution";
+import type { ResolvedAddressHierarchyItems } from "@/types/propertyAddress.types";
 
 const DEFAULT_ADDRESS_LATITUDE = 11.5564;
 const DEFAULT_ADDRESS_LONGITUDE = 104.9282;
@@ -74,48 +74,6 @@ const EMPTY_RESOLVED_ADDRESS_ITEMS: ResolvedAddressHierarchyItems = {
   district: null,
   commune: null,
   village: null,
-};
-
-type AddressLookupItem = ResolvedAddressItem | Commune | Village;
-const PLUS_CODE_PATTERN =
-  /\b([23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3})\b/giu;
-type ResolvedAddressDraft = {
-  latitude: number | null;
-  longitude: number | null;
-  formattedAddress: string | null;
-  resolvedFormattedAddress: string | null;
-  placeId: string | null;
-  street: string | null;
-  houseNumber: string | null;
-  provinceId: string | null;
-  districtId: string | null;
-  communeId: string | null;
-  villageId: string | null;
-  province?: ResolvedAddressItem | null;
-  district?: ResolvedAddressItem | null;
-  commune?: ResolvedAddressItem | null;
-  village?: ResolvedAddressItem | null;
-};
-
-const normalizeAddressLookupText = (value: string | null | undefined): string => {
-  return (value ?? "")
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(PLUS_CODE_PATTERN, " ")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-};
-
-const normalizeHierarchyTerm = (value: string | null | undefined): string => {
-  return normalizeAddressLookupText(value).replace(
-    /\b(village|phum|sangkat|commune|khan|district|province|city|krong)\b/gu,
-    " "
-  ).replace(/\s+/g, " ").trim();
-};
-
-const compactHierarchyTerm = (value: string | null | undefined): string => {
-  return normalizeHierarchyTerm(value).replace(/\s+/g, "");
 };
 
 const pickFirstNonEmpty = (...values: Array<string | null | undefined>): string | null => {
@@ -156,104 +114,6 @@ const parseCoordinatePairInput = (
     latitude: latitude.toFixed(6),
     longitude: longitude.toFixed(6),
   };
-};
-
-const extractHierarchyTermsFromAddress = (value: string | null | undefined) => {
-  const input = value?.trim() ?? "";
-  if (!input) {
-    return {
-      province: null,
-      district: null,
-      commune: null,
-      village: null,
-    };
-  }
-
-  const normalizedInput = input.replace(PLUS_CODE_PATTERN, " ").replace(/\s+/g, " ").trim();
-
-  const segments = normalizedInput
-    .split(",")
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-
-  const extractLabeledTerm = (pattern: RegExp): string | null => {
-    const match = normalizedInput.match(pattern);
-    return pickFirstNonEmpty(match?.[1], match?.[2]);
-  };
-
-  const province =
-    extractLabeledTerm(/(?:^|,)\s*(?:province|city|krong)\s+([^,]+)|([^,]+?)\s+(?:province|city|krong)(?=,|$)/iu) ??
-    segments[segments.length - 1] ??
-    null;
-  const district =
-    extractLabeledTerm(/(?:^|,)\s*(?:khan|district)\s+([^,]+)|([^,]+?)\s+(?:khan|district)(?=,|$)/iu) ??
-    segments[segments.length - 2] ??
-    null;
-  const commune =
-    extractLabeledTerm(/(?:^|,)\s*(?:sangkat|commune)\s+([^,]+)|([^,]+?)\s+(?:sangkat|commune)(?=,|$)/iu) ??
-    segments[segments.length - 3] ??
-    null;
-  const village =
-    extractLabeledTerm(/(?:^|,)\s*(?:village|phum)\s+([^,]+)|([^,]+?)\s+(?:village|phum)(?=,|$)/iu) ??
-    segments[segments.length - 4] ??
-    null;
-
-  return { province, district, commune, village };
-};
-
-const findBestAddressLookupMatch = <T extends AddressLookupItem>(
-  items: T[],
-  term: string | null | undefined
-): T | null => {
-  const normalizedTerm = normalizeHierarchyTerm(term);
-  const compactTerm = compactHierarchyTerm(term);
-  if (!normalizedTerm) return null;
-
-  let bestMatch: T | null = null;
-  let bestScore = 0;
-
-  for (const item of items) {
-    const normalizedNameEn = normalizeHierarchyTerm(item.nameEn);
-    const normalizedNameKh = normalizeHierarchyTerm(item.nameKh);
-    const candidates = [normalizedNameEn, normalizedNameKh].filter(Boolean);
-
-    let score = 0;
-    for (const candidate of candidates) {
-      const compactCandidate = candidate.replace(/\s+/g, "");
-
-      if (!candidate) continue;
-      if (candidate === normalizedTerm) {
-        score = Math.max(score, 100);
-      } else if (compactTerm && compactCandidate === compactTerm) {
-        score = Math.max(score, 96);
-      } else if (candidate.includes(normalizedTerm) || normalizedTerm.includes(candidate)) {
-        score = Math.max(score, 85);
-      } else if (
-        compactTerm &&
-        (compactCandidate.includes(compactTerm) || compactTerm.includes(compactCandidate))
-      ) {
-        score = Math.max(score, 82);
-      } else {
-        const candidateTokens = new Set(candidate.split(" ").filter(Boolean));
-        const termTokens = normalizedTerm.split(" ").filter(Boolean);
-        const sharedTokens = termTokens.filter((token) => candidateTokens.has(token)).length;
-
-        if (sharedTokens > 0) {
-          score = Math.max(
-            score,
-            Math.round((sharedTokens / Math.max(termTokens.length, candidateTokens.size)) * 80)
-          );
-        }
-      }
-    }
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = item;
-    }
-  }
-
-  return bestScore >= 70 ? bestMatch : null;
 };
 
 export default function AddPropertyPage() {
@@ -807,68 +667,22 @@ export default function AddPropertyPage() {
   }, []);
 
   const completeResolvedHierarchyFromDetectedAddress = useCallback(
-    async (resolved: ResolvedAddressDraft): Promise<ResolvedAddressDraft> => {
-      if (addressResolutionSourceRef.current !== "formattedAddress") {
+    async (
+      resolved: ResolvedAddressDraft,
+      detectedAddressOverride?: string | null
+    ): Promise<ResolvedAddressDraft> => {
+      const typedAddress = (
+        detectedAddressOverride ?? formData.formattedAddress
+      ).trim();
+      const shouldUseDetectedAddress =
+        addressResolutionSourceRef.current === "formattedAddress" ||
+        typedAddress.length > 0;
+
+      if (!shouldUseDetectedAddress || !typedAddress) {
         return resolved;
       }
 
-      const typedAddress = formData.formattedAddress.trim();
-      if (!typedAddress || !resolved.districtId) {
-        return resolved;
-      }
-
-      const levelTerms = extractHierarchyTermsFromAddress(typedAddress);
-      const nextResolved = { ...resolved };
-
-      if (nextResolved.districtId && (nextResolved.communeId || levelTerms.commune)) {
-        const communes = await propertyAddressService.getAllCommunesByDistrictCode(
-          nextResolved.districtId
-        );
-        let matchedCommune =
-          communes.find((commune) => commune.code === nextResolved.communeId) ?? null;
-
-        if (levelTerms.commune) {
-          matchedCommune =
-            findBestAddressLookupMatch(communes, levelTerms.commune) ?? matchedCommune;
-        }
-
-        if (matchedCommune) {
-          nextResolved.communeId = matchedCommune.code;
-          nextResolved.commune = matchedCommune;
-        } else if (levelTerms.commune) {
-          nextResolved.communeId = null;
-          nextResolved.commune = null;
-        }
-      }
-
-      if (nextResolved.communeId) {
-        const villages = await propertyAddressService.getAllVillagesByCommuneCode(
-          nextResolved.communeId
-        );
-
-        if (nextResolved.villageId) {
-          const villageStillMatches = villages.some(
-            (village) => village.code === nextResolved.villageId
-          );
-          if (!villageStillMatches) {
-            nextResolved.villageId = null;
-            nextResolved.village = null;
-          }
-        }
-
-        if (!nextResolved.villageId && levelTerms.village) {
-          const matchedVillage = findBestAddressLookupMatch(villages, levelTerms.village);
-          if (matchedVillage) {
-            nextResolved.villageId = matchedVillage.code;
-            nextResolved.village = matchedVillage;
-          }
-        }
-      } else {
-        nextResolved.villageId = null;
-        nextResolved.village = null;
-      }
-
-      return nextResolved;
+      return completeResolvedHierarchyFromDetectedAddressShared(resolved, typedAddress);
     },
     [formData.formattedAddress]
   );
@@ -942,6 +756,78 @@ export default function AddPropertyPage() {
       };
     });
   }, []);
+
+  useEffect(() => {
+    const nextCodes: AddressCodes = {
+      provinceId: pickFirstNonEmpty(
+        formData.provinceId,
+        addressCodes.provinceId,
+        resolvedAddressItems.province?.code
+      ),
+      districtId: pickFirstNonEmpty(
+        formData.districtId,
+        addressCodes.districtId,
+        resolvedAddressItems.district?.code
+      ),
+      communeId: pickFirstNonEmpty(
+        formData.communeId,
+        addressCodes.communeId,
+        resolvedAddressItems.commune?.code
+      ),
+      villageId: pickFirstNonEmpty(
+        formData.villageId,
+        addressCodes.villageId,
+        resolvedAddressItems.village?.code
+      ),
+    };
+
+    setAddressCodes((prev) => {
+      if (
+        prev.provinceId === nextCodes.provinceId &&
+        prev.districtId === nextCodes.districtId &&
+        prev.communeId === nextCodes.communeId &&
+        prev.villageId === nextCodes.villageId
+      ) {
+        return prev;
+      }
+
+      return nextCodes;
+    });
+
+    setFormData((prev) => {
+      const nextFormData = {
+        ...prev,
+        provinceId: pickFirstNonEmpty(prev.provinceId, nextCodes.provinceId) ?? "",
+        districtId: pickFirstNonEmpty(prev.districtId, nextCodes.districtId) ?? "",
+        communeId: pickFirstNonEmpty(prev.communeId, nextCodes.communeId) ?? "",
+        villageId: pickFirstNonEmpty(prev.villageId, nextCodes.villageId) ?? "",
+      };
+
+      if (
+        nextFormData.provinceId === prev.provinceId &&
+        nextFormData.districtId === prev.districtId &&
+        nextFormData.communeId === prev.communeId &&
+        nextFormData.villageId === prev.villageId
+      ) {
+        return prev;
+      }
+
+      return nextFormData;
+    });
+  }, [
+    addressCodes.communeId,
+    addressCodes.districtId,
+    addressCodes.provinceId,
+    addressCodes.villageId,
+    formData.communeId,
+    formData.districtId,
+    formData.provinceId,
+    formData.villageId,
+    resolvedAddressItems.commune?.code,
+    resolvedAddressItems.district?.code,
+    resolvedAddressItems.province?.code,
+    resolvedAddressItems.village?.code,
+  ]);
 
   // 3. Handle Map Shape Changes (Drawing on Map)
   // Use a ref to track if polygon was ever drawn - once set, preserve until explicitly cleared
@@ -1116,14 +1002,37 @@ export default function AddPropertyPage() {
       }
     }
 
+    normalizedResolved = await ensureResolvedAddressHierarchy(normalizedResolved);
+
+    const shouldCompleteFromResolvedAddress = !(
+      normalizedResolved.provinceId &&
+      normalizedResolved.districtId &&
+      normalizedResolved.communeId
+    );
+
     if (shouldPreferTypedDetectedAddress) {
       try {
-        normalizedResolved = await completeResolvedHierarchyFromDetectedAddress({
-          ...normalizedResolved,
-          formattedAddress: typedDetectedAddress,
-        });
+        normalizedResolved = await completeResolvedHierarchyFromDetectedAddress(
+          {
+            ...normalizedResolved,
+            formattedAddress: typedDetectedAddress,
+          },
+          typedDetectedAddress
+        );
       } catch (error) {
         console.error("Failed to complete typed detected address hierarchy", error);
+      }
+    } else if (
+      shouldCompleteFromResolvedAddress &&
+      normalizedResolved.formattedAddress?.trim()
+    ) {
+      try {
+        normalizedResolved = await completeResolvedHierarchyFromDetectedAddress(
+          normalizedResolved,
+          normalizedResolved.formattedAddress.trim()
+        );
+      } catch (error) {
+        console.error("Failed to complete reverse geocoded address hierarchy", error);
       }
     }
 
@@ -1216,9 +1125,24 @@ export default function AddPropertyPage() {
       try {
         const resolved = await propertyAddressService.resolveAddress(payload);
         if (activeResolveRequestRef.current !== requestId) return;
-        const completedResolved = shouldResolveFromDetectedAddress
-          ? await completeResolvedHierarchyFromDetectedAddress(resolved)
-          : resolved;
+        const hydratedResolved = await ensureResolvedAddressHierarchy(resolved);
+        if (activeResolveRequestRef.current !== requestId) return;
+        const shouldCompleteFromHydratedAddress = !(
+          hydratedResolved.provinceId &&
+          hydratedResolved.districtId &&
+          hydratedResolved.communeId
+        );
+        const completionAddress = shouldResolveFromDetectedAddress
+          ? trimmedAddress
+          : shouldCompleteFromHydratedAddress
+          ? hydratedResolved.formattedAddress?.trim() ?? ""
+          : "";
+        const completedResolved = completionAddress
+          ? await completeResolvedHierarchyFromDetectedAddress(
+              hydratedResolved,
+              completionAddress
+            )
+          : hydratedResolved;
         if (activeResolveRequestRef.current !== requestId) return;
         const nextResolved =
           hasValidCoordinates && addressResolutionSourceRef.current === "coordinates"
@@ -1509,10 +1433,23 @@ export default function AddPropertyPage() {
 
   const handleInputChange = (field: string, value: any) => {
     if (field === "formattedAddress") {
-      hasAddressResolutionInteractionRef.current = String(value ?? "").trim().length > 0;
-      preserveTypedDetectedAddressRef.current = String(value ?? "").trim().length > 0;
-      addressResolutionSourceRef.current = "formattedAddress";
+      const nextValue = String(value ?? "");
+      const coordinatePair = parseCoordinatePairInput(nextValue);
+
+      hasAddressResolutionInteractionRef.current = nextValue.trim().length > 0;
+      preserveTypedDetectedAddressRef.current = !coordinatePair && nextValue.trim().length > 0;
+      addressResolutionSourceRef.current = coordinatePair ? "coordinates" : "formattedAddress";
       lastResolvedAddressKeyRef.current = "";
+
+      if (coordinatePair) {
+        setFormData((prev) => ({
+          ...prev,
+          formattedAddress: nextValue,
+          latitude: coordinatePair.latitude,
+          longitude: coordinatePair.longitude,
+        }));
+        return;
+      }
     }
 
     if (field === "latitude" || field === "longitude") {
