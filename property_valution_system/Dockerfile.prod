@@ -7,9 +7,10 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 
-# Install only prod + dev deps needed for build
+# Install deps – use npm install to handle cross-platform lock file differences
+# (lock file generated on Windows may be missing Linux-only optional deps like @swc/helpers)
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm install
 
 # ── Stage 2: Build ───────────────────────────────────
 FROM node:20-alpine AS builder
