@@ -62,4 +62,4 @@ The backend development Docker setup already runs on port `4000`, so this matche
 ## Project Documentation
 
 - Backend setup and deployment: [property_valution_api/README.md](/mnt/c/Camtop%20test/property_valution_api/README.md)
-- Frontend setup and development: [property_valution_system/README.md](/mnt/c/Camtop%20test/property_valution_system/README.md)
+- Frontend setup and development: [property_valution_system/README.md](mnt/c/Camtop%20test/property_valution_system/README.md)
