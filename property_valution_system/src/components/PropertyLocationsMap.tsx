@@ -196,14 +196,14 @@ export default function PropertyLocationsMap({
   }, [activeSearchPropertyIds, properties]);
 
   const markerEntries = useMemo<MarkerLayerEntry[]>(() => {
-    const visibleLayers: MarkerLayer[] =
+    const requestedLayers: MarkerLayer[] | null =
       coverageFilter === "property_only"
         ? ["property"]
         : coverageFilter === "property_valuation_only"
           ? ["valuation"]
           : coverageFilter === "indicative_valuation_only"
             ? ["indicative"]
-            : ["property", "valuation", "indicative"];
+            : null;
 
     return displayedProperties.flatMap((property) => {
       const baseLat = Number(property.latitude);
@@ -218,6 +218,18 @@ export default function PropertyLocationsMap({
         valuation: [],
         indicativeValuation: [],
       };
+
+      const visibleLayers =
+        requestedLayers ??
+        (() => {
+          const layers: MarkerLayer[] = [];
+
+          if (property.hasValuation) layers.push("valuation");
+          if (property.hasIndicativeValuation) layers.push("indicative");
+          if (!layers.length) layers.push("property");
+
+          return layers;
+        })();
 
       visibleLayers.forEach((layer) => {
         if (layer === "valuation" && !property.hasValuation) return;
