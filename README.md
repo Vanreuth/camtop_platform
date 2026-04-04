@@ -1,5 +1,9 @@
 # CamTop Property Valuation
 
+![Deploy](https://github.com/Vanreuth/camtop_platform/actions/workflows/deploy.yml/badge.svg)
+
+🌐 Production: [camtopproperty.site](https://camtopproperty.site) | API: [api.camtopproperty.site](https://api.camtopproperty.site)
+
 This workspace contains the backend API and the frontend dashboard used for property valuation, indicative valuation, authentication, role-based access, maps, and reporting.
 
 ## Projects
