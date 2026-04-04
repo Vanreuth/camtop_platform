@@ -85,6 +85,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB:   ${POSTGRES_DB}
+      # ⚠️  Set RUN_SEED=true in infra/.env for FIRST DEPLOY ONLY.
+      # Remove or set to false after seeding to prevent data wipe on restart.
+      RUN_SEED:      ${RUN_SEED:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -97,7 +100,15 @@ services:
       sh -c "
         echo '⏳ Running Prisma migrations...' &&
         npx prisma migrate deploy &&
-        echo '✅ Migrations done. Starting server...' &&
+        echo '✅ Migrations done.' &&
+        if [ \"$$RUN_SEED\" = 'true' ]; then
+          echo '🌱 RUN_SEED=true detected. Running seed...' &&
+          npx tsx prisma/seed.ts &&
+          echo '✅ Seed complete.';
+        else
+          echo '⏭️  Skipping seed (RUN_SEED != true).';
+        fi &&
+        echo '🚀 Starting server...' &&
         node dist/server.js
       "
     healthcheck:
@@ -113,6 +124,11 @@ services:
     build:
       context: ../property_valution_system
       dockerfile: Dockerfile.prod
+      # Pass NEXT_PUBLIC_* as build args so Next.js bakes them in at build time
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID}
+        NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY}
     image: property_valuation_frontend:latest
     container_name: property_valuation_frontend
     restart: unless-stopped

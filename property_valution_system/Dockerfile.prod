@@ -19,7 +19,17 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Build Next.js app in standalone mode
+# ── NEXT_PUBLIC_* vars must be baked in at build time ──
+# Declare ARGs so docker-compose can pass them via build.args
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID
+ARG NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY
+
+# Expose them as ENV so Next.js picks them up during `npm run build`
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_CLIENT_ID
+ENV NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY
+
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
