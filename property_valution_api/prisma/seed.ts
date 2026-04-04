@@ -1,5 +1,11 @@
 import { PrismaClient } from "@prisma/client";
-import { hashPassword } from "../src/common/utils/hash";
+import bcrypt from "bcryptjs";
+
+// Inline hash helper – avoids dependency on src/ which is absent in production image
+const hashPassword = async (password: string): Promise<string> => {
+  const salt = await bcrypt.genSalt(10);
+  return bcrypt.hash(password, salt);
+};
 import fs from "fs";
 import path from "path";
 
