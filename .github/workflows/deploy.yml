@@ -42,7 +42,7 @@ jobs:
 
       - name: Install frontend deps
         working-directory: property_valution_system
-        run: npm ci
+        run: npm install   # npm ci fails on Linux with Windows-generated lock file
 
       - name: Type-check frontend
         working-directory: property_valution_system
