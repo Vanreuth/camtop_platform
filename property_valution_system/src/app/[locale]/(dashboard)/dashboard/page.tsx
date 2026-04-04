@@ -371,7 +371,7 @@ export default function DashboardPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{tNav("dashboard")}</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {tDashboard("welcomeSummary", { welcome: tCommon("welcome") })}
+              {tDashboard("welcomeSummary", { welcome: tCommon("welcome") })} Camtop
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
