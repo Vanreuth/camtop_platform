@@ -9,6 +9,7 @@ import {
 import { prisma } from "../../db/prisma";
 import { BadRequestError } from "../../common/errors/badRequest.error";
 import { createPropertyCodeService } from "../../services/property/propertyCode.service";
+import { invalidatePropertyStatisticsCache } from "../../services/cache/propertyStatisticsCache";
 
 export type PropertyExcelExportFilters = {
   status?: PropertyStatus;
@@ -941,6 +942,10 @@ export const importPropertiesFromExcel = async (
         message: error instanceof Error ? error.message : "Unknown import error",
       });
     }
+  }
+
+  if (created > 0 || updated > 0) {
+    await invalidatePropertyStatisticsCache();
   }
 
   return {

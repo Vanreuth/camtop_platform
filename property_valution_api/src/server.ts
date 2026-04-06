@@ -2,6 +2,7 @@ import config from "./config";
 import { app } from "./app";
 import { prisma } from "./db/prisma";
 import { logger } from "./config/logger";
+import { cacheService } from "./services/cache/cache.service";
 import "./events/listeners/valuationListeners";
 import "./events/listeners/indicativeValuationListeners";
 // do NOT import propertyEventListeners again here
@@ -60,6 +61,9 @@ async function shutdown(signal: string) {
     // Close DB
     await prisma.$disconnect();
     logger.info("🗄️ Prisma disconnected");
+
+    await cacheService.disconnect();
+    logger.info("🧰 Cache disconnected");
 
     clearTimeout(forceTimeout);
     process.exit(0);

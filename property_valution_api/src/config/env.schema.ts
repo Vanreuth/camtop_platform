@@ -19,6 +19,14 @@ export const envSchema = z
     POSTGRES_PASSWORD: z.string().default(""),
     POSTGRES_DB: z.string().default("property_valuation_db"),
 
+    // Cache / Redis
+    REDIS_URL: z.string().url().optional(),
+    REDIS_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
+    CACHE_ADDRESS_TTL_SECONDS: z.coerce.number().int().positive().default(86400),
+    CACHE_PROPERTY_TYPE_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
+    CACHE_PROPERTY_STATS_TTL_SECONDS: z.coerce.number().int().positive().default(60),
+    CACHE_GEOCODE_TTL_SECONDS: z.coerce.number().int().positive().default(1209600),
+
     // JWT
     JWT_SECRET: z.string().min(1),
     JWT_EXPIRES_IN: z.string().optional(),

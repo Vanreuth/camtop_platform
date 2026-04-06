@@ -26,6 +26,7 @@ import { createPropertyCodeService } from "../../services/property/propertyCode.
 import { FileUploadService } from "../../services/fileUpload.service";
 import { PropertyValuationRepository } from "./propertyValuation.respository";
 import { valuationEmitter, ValuationEvents } from "../../events/eventEmitter";
+import { invalidatePropertyStatisticsCache } from "../../services/cache/propertyStatisticsCache";
 
 const repository = new PropertyValuationRepository();
 const propertyCodeService = createPropertyCodeService(prisma as any);
@@ -426,6 +427,9 @@ const createPropertyValuation = async (
   //     });
   //     break;
   // }
+
+  await invalidatePropertyStatisticsCache();
+
   return {
     success: true,
     message: "Property Valuation created successfully",
@@ -797,6 +801,8 @@ const updatePropertyValuation = async (
     });
   });
 
+  await invalidatePropertyStatisticsCache();
+
   return {
     success: true,
     message: "Property Valuation updated successfully",
@@ -912,6 +918,8 @@ const submitForReview = async (
   // Emit event for notification
   valuationEmitter.emit(ValuationEvents.SUBMITTED, { valuation: result, submittedBy: userId });
 
+  await invalidatePropertyStatisticsCache();
+
   return {
     success: true,
     message: "Property Valuation submitted for review successfully",
@@ -982,6 +990,7 @@ const approveValuation = async (
   });
 
   valuationEmitter.emit(ValuationEvents.APPROVED, { valuation: result, approvedBy: approvalData.approvedById });
+  await invalidatePropertyStatisticsCache();
   return { success: true, message: "Property Valuation approved successfully", data: result };
 };
 
@@ -1033,6 +1042,8 @@ const rejectValuation = async (
     rejectedBy: rejectionData.rejectedById,
     reason: rejectionData.rejectionReason 
   });
+
+  await invalidatePropertyStatisticsCache();
   
   return { success: true, message: "Property Valuation rejected successfully", data: result };
 };
@@ -1050,6 +1061,8 @@ const deletePropertyValuation = async (valuationId: number) => {
       status: PropertyValuationStatus.CANCELLED,
     },
   });
+
+  await invalidatePropertyStatisticsCache();
 
   return {
     success: true,

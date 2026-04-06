@@ -1,5 +1,8 @@
 import { BadRequestError } from "../../common/errors/badRequest.error";
+import config from "../../config";
 import { googleMapService } from "../../services/googleMap.service";
+import { cacheService } from "../../services/cache/cache.service";
+import { cacheKeys } from "../../services/cache/cacheKeys";
 import {
 	CommuneLookupRow,
 	DistrictLookupRow,
@@ -217,19 +220,35 @@ export class PropertyAddressService {
 	}
 
 	getAllProvinces() {
-		return this.repo.getAllProvinces();
+		return cacheService.getOrSetJson(
+			cacheKeys.address.provinces,
+			config.redis.addressTtlSeconds,
+			() => this.repo.getAllProvinces()
+		);
 	}
 
 	getAllDistrictsByProvinceCode(provinceCode: string) {
-		return this.repo.getAllDistrictsByProvinceCode(provinceCode);
+		return cacheService.getOrSetJson(
+			cacheKeys.address.districtsByProvince(provinceCode),
+			config.redis.addressTtlSeconds,
+			() => this.repo.getAllDistrictsByProvinceCode(provinceCode)
+		);
 	}
 
 	getAllCommunesByDistrictCode(districtCode: string) {
-		return this.repo.getAllCommunesByDistrictCode(districtCode);
+		return cacheService.getOrSetJson(
+			cacheKeys.address.communesByDistrict(districtCode),
+			config.redis.addressTtlSeconds,
+			() => this.repo.getAllCommunesByDistrictCode(districtCode)
+		);
 	}
 
 	getAllVillagesByCommuneCode(communeCode: string) {
-		return this.repo.getAllVillagesByCommuneCode(communeCode);
+		return cacheService.getOrSetJson(
+			cacheKeys.address.villagesByCommune(communeCode),
+			config.redis.addressTtlSeconds,
+			() => this.repo.getAllVillagesByCommuneCode(communeCode)
+		);
 	}
 
 	private async matchHierarchyFromText(

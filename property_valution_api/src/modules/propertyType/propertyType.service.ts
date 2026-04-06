@@ -2,47 +2,60 @@ import {
   CreatePropertyTypeDto,
   UpdatePropertyTypeDto,
 } from "./propertyType.dto";
+import config from "../../config";
 import { NotFoundError } from "../../common/errors/notFound.error";
+import { cacheService } from "../../services/cache/cache.service";
+import { cacheKeys } from "../../services/cache/cacheKeys";
 import { PropertyTypeRepository } from "./propertytype.respository";
 
 const repository = new PropertyTypeRepository();
 
 const getAllPropertyTypes = async () => {
-  return await repository.findMany({
-    include: {
-      subtypes: true,
-      recordType: true,
-      currentUses: {
+  return await cacheService.getOrSetJson(
+    cacheKeys.propertyType.all,
+    config.redis.propertyTypeTtlSeconds,
+    () =>
+      repository.findMany({
         include: {
-          currentUse: true,
+          subtypes: true,
+          recordType: true,
+          currentUses: {
+            include: {
+              currentUse: true,
+            },
+          },
+          _count: {
+            select: {
+              properties: true,
+            },
+          },
         },
-      },
-      _count: {
-        select: {
-          properties: true,
+        orderBy: {
+          propertyName: "asc",
         },
-      },
-    },
-    orderBy: {
-      propertyName: "asc",
-    },
-  });
+      })
+  );
 };
 
 const getPropertyTypeById = async (id: number) => {
-  const propertyType = await repository.findUnique({
-    where: { propertyTypeId: id },
-    include: {
-      recordType: true,
-      currentUses: {
+  const propertyType = await cacheService.getOrSetJson(
+    cacheKeys.propertyType.byId(id),
+    config.redis.propertyTypeTtlSeconds,
+    () =>
+      repository.findUnique({
+        where: { propertyTypeId: id },
         include: {
-          currentUse: true,
+          recordType: true,
+          currentUses: {
+            include: {
+              currentUse: true,
+            },
+          },
+          subtypes: true,
+          buildingSubtypes: true,
         },
-      },
-      subtypes: true,
-      buildingSubtypes: true,
-    },
-  });
+      })
+  );
 
   if (!propertyType) {
     throw new NotFoundError(`Property type with ID ${id} not found`);
@@ -58,7 +71,7 @@ const createPropertyType = async (data: CreatePropertyTypeDto) => {
   if (!recordType) {
     throw new Error("Record type not found");
   }
-  return await repository.create({
+  const createdPropertyType = await repository.create({
     data: {
       propertyName: data.propertyTypeName,
       recordTypeId: data.recordTypeId,
@@ -90,6 +103,10 @@ const createPropertyType = async (data: CreatePropertyTypeDto) => {
       },
     },
   });
+
+  await cacheService.delete(cacheKeys.propertyType.all);
+
+  return createdPropertyType;
 };
 
 const updatePropertyType = async (
@@ -98,7 +115,7 @@ const updatePropertyType = async (
 ) => {
   const existingPropertyType = await repository.findUnique({
     where: { propertyTypeId },
-    include: { currentUses: true, subtypes: true },
+    select: { propertyTypeId: true },
   });
 
   if (!existingPropertyType) {
@@ -120,47 +137,53 @@ const updatePropertyType = async (
     }
   }
 
-  // Clear old relations first to avoid duplicates.
-  await repository.deleteManyCurrentUses({
-    where: { propertyTypeId },
-  });
-
-  await repository.deleteManySubtypes({
-    where: { propertyTypeId },
-  });
-
-  return await repository.update({
-    where: { propertyTypeId },
-    data: {
-      propertyName: data.propertyTypeName,
-      ...(data.recordTypeId && {
-        recordType: {
-          connect: { recordTypeId: data.recordTypeId },
-        },
-      }),
-      ...(data.subtypeName &&
-        data.subtypeName.length > 0 && {
-          subtypes: {
-            create: data.subtypeName.map((name) => ({ subtypeName: name })),
+  const updatedPropertyType = await repository.transaction([
+    repository.deleteManyCurrentUses({
+      where: { propertyTypeId },
+    }),
+    repository.deleteManySubtypes({
+      where: { propertyTypeId },
+    }),
+    repository.update({
+      where: { propertyTypeId },
+      data: {
+        propertyName: data.propertyTypeName,
+        ...(data.recordTypeId && {
+          recordType: {
+            connect: { recordTypeId: data.recordTypeId },
           },
         }),
-      ...(data.currentUseId &&
-        data.currentUseId.length > 0 && {
-          currentUses: {
-            create: data.currentUseId.map((useId) => ({ useId })),
+        ...(data.subtypeName &&
+          data.subtypeName.length > 0 && {
+            subtypes: {
+              create: data.subtypeName.map((name) => ({ subtypeName: name })),
+            },
+          }),
+        ...(data.currentUseId &&
+          data.currentUseId.length > 0 && {
+            currentUses: {
+              create: data.currentUseId.map((useId) => ({ useId })),
+            },
+          }),
+      },
+      include: {
+        recordType: true,
+        subtypes: true,
+        currentUses: {
+          include: {
+            currentUse: true,
           },
-        }),
-    },
-    include: {
-      recordType: true,
-      subtypes: true,
-      currentUses: {
-        include: {
-          currentUse: true,
         },
       },
-    },
-  });
+    }),
+  ]).then(([, , result]) => result);
+
+  await cacheService.deleteMany([
+    cacheKeys.propertyType.all,
+    cacheKeys.propertyType.byId(propertyTypeId),
+  ]);
+
+  return updatedPropertyType;
 };
 
 const deletePropertyType = async (id: number) => {
@@ -176,6 +199,11 @@ const deletePropertyType = async (id: number) => {
     repository.deleteManySubtypes({ where: { propertyTypeId: id } }),
     repository.deleteManyCurrentUses({ where: { propertyTypeId: id } }),
     repository.delete({ where: { propertyTypeId: id } }),
+  ]);
+
+  await cacheService.deleteMany([
+    cacheKeys.propertyType.all,
+    cacheKeys.propertyType.byId(id),
   ]);
 
   return { message: "Property type deleted successfully" };

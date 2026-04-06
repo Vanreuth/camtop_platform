@@ -12,6 +12,7 @@ import { BadRequestError } from "../../common/errors/badRequest.error";
 import { NotFoundError } from "../../common/errors/notFound.error";
 import { ForbiddenError } from "../../common/errors/forbidden.error";
 import { AppError } from "../../common/errors/app.error";
+import config from "../../config";
 import { prisma } from "../../db/prisma";
 import type {
   CreatePropertyDto,
@@ -37,12 +38,21 @@ import {
 import { truncateString } from "../../common/utils/formatters";
 import { PricePerSqmCalculator } from "../../common/utils/calculators";
 import { DIRECT_UNIT_TYPES } from "../../common/constants/propertyTypes";
+import { cacheService } from "../../services/cache/cache.service";
+import { cacheKeys } from "../../services/cache/cacheKeys";
 
 const notificationService = new NotificationService();
 
 type PolygonMetricsRow = { areaSqM: number; perimeterM: number };
 type PolygonMetrics = { areaSqMeters: number; perimeterMeters: number };
 type LocationNumeric = number | string | Prisma.Decimal | null;
+type PropertyStatisticsFilters = {
+  startDate?: Date;
+  endDate?: Date;
+  propertyTypeId?: number;
+  provinceId?: string;
+  status?: string;
+};
 const propertyCodeService = createPropertyCodeService(prisma as any);
 const propertyUploadService = createPropertyUploadService(
   FileUploadService as any,
@@ -130,6 +140,12 @@ const containsInsensitive = (value: string) => ({
   mode: Prisma.QueryMode.insensitive,
 });
 
+const trimToUndefined = (value: string | undefined) => {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
 const normalizeOptionalDescription = (
   value: unknown,
 ): string | null | undefined => {
@@ -160,6 +176,70 @@ const includeForProperty = {
   },
 } as const;
 
+const selectForPropertyList: Prisma.PropertySelect = {
+  propertyId: true,
+  propertyCode: true,
+  propertyName: true,
+  status: true,
+  workflowStatus: true,
+  createdAt: true,
+  propertyType: {
+    select: {
+      propertyTypeId: true,
+      propertyName: true,
+    },
+  },
+  propertyAddress: {
+    select: {
+      province: {
+        select: {
+          code: true,
+          nameEn: true,
+          nameKh: true,
+        },
+      },
+      district: {
+        select: {
+          code: true,
+          nameEn: true,
+          nameKh: true,
+        },
+      },
+    },
+  },
+  transaction: {
+    orderBy: [{ transactionDate: "desc" }, { createdAt: "desc" }],
+    take: 1,
+    select: {
+      transactionId: true,
+      transactionType: true,
+      transactionDate: true,
+      totalPrice: true,
+      newBuildingCost: true,
+      depreciationAmount: true,
+      currentBuildingValue: true,
+      residualLandValue: true,
+      pricePerSqm: true,
+      valuationId: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  },
+  createdByUser: {
+    select: {
+      id: true,
+      username: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
+      status: true,
+      lastLogin: true,
+      profilePicture: true,
+    },
+  },
+};
+
 const getGoogleMapLink = (latitude: number, longitude: number): string => {
   return `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
 };
@@ -167,6 +247,10 @@ const getGoogleMapLink = (latitude: number, longitude: number): string => {
 const settledArray = async <T>(promise: Promise<T[]>) => {
   const result = await Promise.allSettled([promise]);
   return result[0].status === "fulfilled" ? result[0].value : [];
+};
+
+const invalidatePropertyStatisticsCache = async () => {
+  await cacheService.increment(cacheKeys.property.statisticsVersion);
 };
 
 export class PropertyService {
@@ -177,6 +261,9 @@ export class PropertyService {
     const page = Math.max(1, pagination.page ?? 1);
     const limit = Math.min(100, Math.max(1, pagination.limit ?? 10));
     const skip = (page - 1) * limit;
+    const search = trimToUndefined(filters.search);
+    const propertyName = trimToUndefined(filters.propertyName);
+    const propertyCode = trimToUndefined(filters.propertyCode);
 
     const where: Prisma.PropertyWhereInput = {
       // If workflowStatus filter is provided, use it; otherwise exclude ARCHIVED
@@ -196,35 +283,31 @@ export class PropertyService {
         ? { propertySubtypeId: filters.propertySubtypeId }
         : {}),
       ...(filters.status ? { status: filters.status } : {}),
-      ...(filters.search || filters.propertyName || filters.propertyCode
+      ...(search || propertyName || propertyCode
         ? {
             OR: [
-              ...(filters.search
+              ...(search
                 ? [
                     {
                       propertyName: {
-                        contains: filters.search,
-                        mode: Prisma.QueryMode.insensitive,
+                        ...containsInsensitive(search),
                       },
                     },
                     {
                       propertyCode: {
-                        contains: filters.search,
-                        mode: Prisma.QueryMode.insensitive,
+                        ...containsInsensitive(search),
                       },
                     },
                     {
                       description: {
-                        contains: filters.search,
-                        mode: Prisma.QueryMode.insensitive,
+                        ...containsInsensitive(search),
                       },
                     },
                     {
                       dataSource: {
                         is: {
                           contactName: {
-                            contains: filters.search,
-                            mode: Prisma.QueryMode.insensitive,
+                            ...containsInsensitive(search),
                           },
                         },
                       },
@@ -233,30 +316,27 @@ export class PropertyService {
                       dataSource: {
                         is: {
                           phoneNumber: {
-                            contains: filters.search,
-                            mode: Prisma.QueryMode.insensitive,
+                            ...containsInsensitive(search),
                           },
                         },
                       },
                     },
                   ]
                 : []),
-              ...(filters.propertyName
+              ...(propertyName
                 ? [
                     {
                       propertyName: {
-                        contains: filters.propertyName,
-                        mode: Prisma.QueryMode.insensitive,
+                        ...containsInsensitive(propertyName),
                       },
                     },
                   ]
                 : []),
-              ...(filters.propertyCode
+              ...(propertyCode
                 ? [
                     {
                       propertyCode: {
-                        contains: filters.propertyCode,
-                        mode: Prisma.QueryMode.insensitive,
+                        ...containsInsensitive(propertyCode),
                       },
                     },
                   ]
@@ -339,7 +419,7 @@ export class PropertyService {
         skip,
         take: limit,
         orderBy,
-        include: includeForProperty,
+        select: selectForPropertyList,
       }),
       prisma.property.count({ where }),
     ]);
@@ -660,6 +740,8 @@ export class PropertyService {
 
     return { property: created, polygonMetrics };
   });
+
+  await invalidatePropertyStatisticsCache();
 
   return result;
 }
@@ -1208,6 +1290,8 @@ export class PropertyService {
       return prop;
     });
 
+    await invalidatePropertyStatisticsCache();
+
     return updated;
   }
 
@@ -1233,6 +1317,8 @@ export class PropertyService {
       },
     });
 
+    await invalidatePropertyStatisticsCache();
+
     return { message: "Property deleted successfully" };
   }
 
@@ -1242,6 +1328,9 @@ export class PropertyService {
     });
     if (!tx) throw new NotFoundError("Transaction not found");
     await prisma.transaction.delete({ where: { transactionId } });
+
+    await invalidatePropertyStatisticsCache();
+
     return { message: "Transaction deleted successfully" };
   }
 
@@ -2342,407 +2431,458 @@ export class PropertyService {
     startDate?: Date;
     endDate?: Date;
     propertyTypeId?: number;
-    provinceId?: number;
+    provinceId?: string;
     status?: string;
   }) {
-    const whereClause: any = { workflowStatus: { not: WorkflowStatus.ARCHIVED } };
-    if (filters?.startDate || filters?.endDate) {
-      whereClause.createdAt = {};
-      if (filters.startDate) whereClause.createdAt.gte = filters.startDate;
-      if (filters.endDate) whereClause.createdAt.lte = filters.endDate;
-    }
-    if (filters?.propertyTypeId) whereClause.propertyTypeId = filters.propertyTypeId;
-    if (filters?.status) whereClause.status = filters.status;
-    if (filters?.provinceId) {
-      whereClause.propertyAddress = { provinceId: filters.provinceId };
-    }
+    const normalizedFilters: PropertyStatisticsFilters = {
+      startDate: filters?.startDate,
+      endDate: filters?.endDate,
+      propertyTypeId: filters?.propertyTypeId,
+      provinceId: trimToUndefined(filters?.provinceId),
+      status: trimToUndefined(filters?.status),
+    };
 
-    // Parallel queries for efficiency
-    const [
-      totalProperties,
-      propertiesByStatus,
-      propertiesByType,
-      propertiesByProvince,
-      transactionStats,
-      transactionCoverageStats,
-      valuationStats,
-      valuationCoverageStats,
-      indicativeCoverageStats,
-      workflowStats,
-      propertyMonthlyTrend,
-      valuationMonthlyTrend,
-      indicativeMonthlyTrend,
-    ] = await Promise.all([
-      // 1. Total count
-      prisma.property.count({ where: whereClause }),
+    const statisticsVersion =
+      (await cacheService.getNumber(cacheKeys.property.statisticsVersion)) ?? 1;
+    const statisticsCacheKey = cacheKeys.property.statistics(
+      normalizedFilters,
+      statisticsVersion,
+    );
 
-      // 2. By status
-      prisma.property.groupBy({
-        by: ["status"],
-        where: whereClause,
-        _count: { status: true },
-      }),
+    return await cacheService.getOrSetJson(
+      statisticsCacheKey,
+      config.redis.propertyStatsTtlSeconds,
+      async () => {
+        const whereClause: any = {
+          workflowStatus: { not: WorkflowStatus.ARCHIVED },
+        };
 
-      // 3. By property type
-      prisma.property.groupBy({
-        by: ["propertyTypeId"],
-        where: whereClause,
-        _count: { propertyTypeId: true },
-        orderBy: { _count: { propertyTypeId: "desc" } },
-      }),
+        if (normalizedFilters.startDate || normalizedFilters.endDate) {
+          whereClause.createdAt = {};
+          if (normalizedFilters.startDate) whereClause.createdAt.gte = normalizedFilters.startDate;
+          if (normalizedFilters.endDate) whereClause.createdAt.lte = normalizedFilters.endDate;
+        }
+        if (normalizedFilters.propertyTypeId) {
+          whereClause.propertyTypeId = normalizedFilters.propertyTypeId;
+        }
+        if (normalizedFilters.status) {
+          whereClause.status = normalizedFilters.status;
+        }
+        if (normalizedFilters.provinceId) {
+          whereClause.propertyAddress = { is: { provinceId: normalizedFilters.provinceId } };
+        }
 
-      // 4. By province (top 10)
-      prisma.propertyAddress.groupBy({
-        by: ["provinceId"],
-        where: {
-          property: whereClause,
-        },
-        _count: { provinceId: true },
-        orderBy: { _count: { provinceId: "desc" } },
-        take: 10,
-      }),
+        const propertyStatisticsMonthlyFilterSql = Prisma.sql`
+          ${normalizedFilters.startDate ? Prisma.sql`AND created_at >= ${normalizedFilters.startDate}` : Prisma.empty}
+          ${normalizedFilters.endDate ? Prisma.sql`AND created_at <= ${normalizedFilters.endDate}` : Prisma.empty}
+          ${normalizedFilters.propertyTypeId ? Prisma.sql`AND property_type_id = ${normalizedFilters.propertyTypeId}` : Prisma.empty}
+          ${normalizedFilters.status ? Prisma.sql`AND status::text = ${normalizedFilters.status}` : Prisma.empty}
+          ${normalizedFilters.provinceId
+            ? Prisma.sql`AND EXISTS (
+                SELECT 1
+                FROM property_address pa
+                WHERE pa.property_id = properties.property_id
+                  AND pa.province_id = ${normalizedFilters.provinceId}
+              )`
+            : Prisma.empty}
+        `;
 
-      // 5. Transaction statistics
-      prisma.transaction.aggregate({
-        where: {
-          property: whereClause,
-        },
-        _count: { transactionId: true },
-        _avg: { totalPrice: true },
-        _min: { totalPrice: true },
-        _max: { totalPrice: true },
-      }),
-
-      prisma.transaction.groupBy({
-        by: ["propertyId"],
-        where: {
-          property: whereClause,
-        },
-      }),
-
-      // 6. Valuation statistics
-      prisma.propertyValuation.aggregate({
-        where: {
-          property: whereClause,
-        },
-        _count: { valuationId: true },
-        _avg: { marketValue: true },
-      }),
-
-      prisma.propertyValuation.groupBy({
-        by: ["propertyId"],
-        where: {
-          property: whereClause,
-        },
-      }),
-
-      // 6.1 Indicative valuation coverage
-      prisma.propertyIndicativeValuation.groupBy({
-        by: ["propertyId"],
-        where: {
-          property: whereClause,
-        },
-      }),
-
-      // 7. Workflow statistics
-      prisma.$transaction(async (tx) => {
         const [
-          propertyPending,
-          propertyApproved,
-          propertyRejected,
-          propertyDraft,
-          valuationPending,
-          valuationApproved,
-          valuationRejected,
-          valuationDraft,
-          indicativePending,
-          indicativeApproved,
-          indicativeRejected,
-          indicativeDraft,
+          totalProperties,
+          propertiesByStatus,
+          propertiesByType,
+          propertiesByProvince,
+          transactionStats,
+          transactionCoverageStats,
+          valuationStats,
+          valuationCoverageStats,
+          indicativeCoverageStats,
+          workflowStats,
+          propertyMonthlyTrend,
+          valuationMonthlyTrend,
+          indicativeMonthlyTrend,
         ] = await Promise.all([
-          tx.property.count({
-            where: { ...whereClause, workflowStatus: WorkflowStatus.PENDING_REVIEW },
+          prisma.property.count({ where: whereClause }),
+          prisma.property.groupBy({
+            by: ["status"],
+            where: whereClause,
+            _count: { status: true },
           }),
-          tx.property.count({
-            where: { ...whereClause, workflowStatus: WorkflowStatus.APPROVED },
+          prisma.property.groupBy({
+            by: ["propertyTypeId"],
+            where: whereClause,
+            _count: { propertyTypeId: true },
+            orderBy: { _count: { propertyTypeId: "desc" } },
           }),
-          tx.property.count({
-            where: { ...whereClause, workflowStatus: WorkflowStatus.REJECTED },
-          }),
-          tx.property.count({
-            where: { ...whereClause, workflowStatus: WorkflowStatus.DRAFT },
-          }),
-          tx.propertyValuation.count({
+          prisma.propertyAddress.groupBy({
+            by: ["provinceId"],
             where: {
               property: whereClause,
-              workflowStatus: WorkflowStatus.PENDING_REVIEW,
             },
+            _count: { provinceId: true },
+            orderBy: { _count: { provinceId: "desc" } },
+            take: 10,
           }),
-          tx.propertyValuation.count({
+          prisma.transaction.aggregate({
             where: {
               property: whereClause,
-              workflowStatus: WorkflowStatus.APPROVED,
             },
+            _count: { transactionId: true },
+            _avg: { totalPrice: true },
+            _min: { totalPrice: true },
+            _max: { totalPrice: true },
           }),
-          tx.propertyValuation.count({
+          prisma.transaction.groupBy({
+            by: ["propertyId"],
             where: {
               property: whereClause,
-              workflowStatus: WorkflowStatus.REJECTED,
             },
           }),
-          tx.propertyValuation.count({
+          prisma.propertyValuation.aggregate({
             where: {
               property: whereClause,
-              workflowStatus: WorkflowStatus.DRAFT,
             },
+            _count: { valuationId: true },
+            _avg: { marketValue: true },
           }),
-          tx.propertyIndicativeValuation.count({
+          prisma.propertyValuation.groupBy({
+            by: ["propertyId"],
             where: {
               property: whereClause,
-              workflowStatus: WorkflowStatus.PENDING_REVIEW,
             },
           }),
-          tx.propertyIndicativeValuation.count({
+          prisma.propertyIndicativeValuation.groupBy({
+            by: ["propertyId"],
             where: {
               property: whereClause,
-              workflowStatus: WorkflowStatus.APPROVED,
             },
           }),
-          tx.propertyIndicativeValuation.count({
-            where: {
-              property: whereClause,
-              workflowStatus: WorkflowStatus.REJECTED,
-            },
+          prisma.$transaction(async (tx) => {
+            const [
+              propertyPending,
+              propertyApproved,
+              propertyRejected,
+              propertyDraft,
+              valuationPending,
+              valuationApproved,
+              valuationRejected,
+              valuationDraft,
+              indicativePending,
+              indicativeApproved,
+              indicativeRejected,
+              indicativeDraft,
+            ] = await Promise.all([
+              tx.property.count({
+                where: { ...whereClause, workflowStatus: WorkflowStatus.PENDING_REVIEW },
+              }),
+              tx.property.count({
+                where: { ...whereClause, workflowStatus: WorkflowStatus.APPROVED },
+              }),
+              tx.property.count({
+                where: { ...whereClause, workflowStatus: WorkflowStatus.REJECTED },
+              }),
+              tx.property.count({
+                where: { ...whereClause, workflowStatus: WorkflowStatus.DRAFT },
+              }),
+              tx.propertyValuation.count({
+                where: {
+                  property: whereClause,
+                  workflowStatus: WorkflowStatus.PENDING_REVIEW,
+                },
+              }),
+              tx.propertyValuation.count({
+                where: {
+                  property: whereClause,
+                  workflowStatus: WorkflowStatus.APPROVED,
+                },
+              }),
+              tx.propertyValuation.count({
+                where: {
+                  property: whereClause,
+                  workflowStatus: WorkflowStatus.REJECTED,
+                },
+              }),
+              tx.propertyValuation.count({
+                where: {
+                  property: whereClause,
+                  workflowStatus: WorkflowStatus.DRAFT,
+                },
+              }),
+              tx.propertyIndicativeValuation.count({
+                where: {
+                  property: whereClause,
+                  workflowStatus: WorkflowStatus.PENDING_REVIEW,
+                },
+              }),
+              tx.propertyIndicativeValuation.count({
+                where: {
+                  property: whereClause,
+                  workflowStatus: WorkflowStatus.APPROVED,
+                },
+              }),
+              tx.propertyIndicativeValuation.count({
+                where: {
+                  property: whereClause,
+                  workflowStatus: WorkflowStatus.REJECTED,
+                },
+              }),
+              tx.propertyIndicativeValuation.count({
+                where: {
+                  property: whereClause,
+                  workflowStatus: WorkflowStatus.DRAFT,
+                },
+              }),
+            ]);
+
+            const propertyWorkflow = {
+              pending: propertyPending,
+              approved: propertyApproved,
+              rejected: propertyRejected,
+              draft: propertyDraft,
+            };
+
+            const valuationWorkflow = {
+              pending: valuationPending,
+              approved: valuationApproved,
+              rejected: valuationRejected,
+              draft: valuationDraft,
+            };
+
+            const indicativeWorkflow = {
+              pending: indicativePending,
+              approved: indicativeApproved,
+              rejected: indicativeRejected,
+              draft: indicativeDraft,
+            };
+
+            return {
+              pending:
+                propertyWorkflow.pending +
+                valuationWorkflow.pending +
+                indicativeWorkflow.pending,
+              approved:
+                propertyWorkflow.approved +
+                valuationWorkflow.approved +
+                indicativeWorkflow.approved,
+              rejected:
+                propertyWorkflow.rejected +
+                valuationWorkflow.rejected +
+                indicativeWorkflow.rejected,
+              draft:
+                propertyWorkflow.draft +
+                valuationWorkflow.draft +
+                indicativeWorkflow.draft,
+              avgApprovalDays: null,
+              property: propertyWorkflow,
+              valuation: valuationWorkflow,
+              indicativeValuation: indicativeWorkflow,
+            };
           }),
-          tx.propertyIndicativeValuation.count({
-            where: {
-              property: whereClause,
-              workflowStatus: WorkflowStatus.DRAFT,
-            },
-          }),
+          prisma.$queryRaw<
+            { month: string; count: number }[]
+          >`
+            SELECT
+              TO_CHAR(created_at, 'YYYY-MM') as month,
+              COUNT(*)::int as count
+            FROM properties
+            WHERE "workflowStatus" != 'ARCHIVED'
+            AND created_at >= NOW() - INTERVAL '12 months'
+            ${propertyStatisticsMonthlyFilterSql}
+            GROUP BY TO_CHAR(created_at, 'YYYY-MM')
+            ORDER BY month DESC
+          `,
+          prisma.$queryRaw<
+            { month: string; count: number }[]
+          >`
+            SELECT
+              TO_CHAR(pv.created_at, 'YYYY-MM') as month,
+              COUNT(*)::int as count
+            FROM property_valuations pv
+            INNER JOIN properties p ON pv.property_id = p.property_id
+            WHERE p."workflowStatus" != 'ARCHIVED'
+            AND pv.created_at >= NOW() - INTERVAL '12 months'
+            ${normalizedFilters.startDate ? Prisma.sql`AND pv.created_at >= ${normalizedFilters.startDate}` : Prisma.empty}
+            ${normalizedFilters.endDate ? Prisma.sql`AND pv.created_at <= ${normalizedFilters.endDate}` : Prisma.empty}
+            ${normalizedFilters.propertyTypeId ? Prisma.sql`AND p.property_type_id = ${normalizedFilters.propertyTypeId}` : Prisma.empty}
+            ${normalizedFilters.status ? Prisma.sql`AND p.status::text = ${normalizedFilters.status}` : Prisma.empty}
+            ${normalizedFilters.provinceId
+              ? Prisma.sql`AND EXISTS (
+                  SELECT 1
+                  FROM property_address pa
+                  WHERE pa.property_id = p.property_id
+                    AND pa.province_id = ${normalizedFilters.provinceId}
+                )`
+              : Prisma.empty}
+            GROUP BY TO_CHAR(pv.created_at, 'YYYY-MM')
+            ORDER BY month DESC
+          `,
+          prisma.$queryRaw<
+            { month: string; count: number }[]
+          >`
+            SELECT
+              TO_CHAR(piv.created_at, 'YYYY-MM') as month,
+              COUNT(*)::int as count
+            FROM property_indicative_valuations piv
+            INNER JOIN properties p ON piv.property_id = p.property_id
+            WHERE p."workflowStatus" != 'ARCHIVED'
+            AND piv.created_at >= NOW() - INTERVAL '12 months'
+            ${normalizedFilters.startDate ? Prisma.sql`AND piv.created_at >= ${normalizedFilters.startDate}` : Prisma.empty}
+            ${normalizedFilters.endDate ? Prisma.sql`AND piv.created_at <= ${normalizedFilters.endDate}` : Prisma.empty}
+            ${normalizedFilters.propertyTypeId ? Prisma.sql`AND p.property_type_id = ${normalizedFilters.propertyTypeId}` : Prisma.empty}
+            ${normalizedFilters.status ? Prisma.sql`AND p.status::text = ${normalizedFilters.status}` : Prisma.empty}
+            ${normalizedFilters.provinceId
+              ? Prisma.sql`AND EXISTS (
+                  SELECT 1
+                  FROM property_address pa
+                  WHERE pa.property_id = p.property_id
+                    AND pa.province_id = ${normalizedFilters.provinceId}
+                )`
+              : Prisma.empty}
+            GROUP BY TO_CHAR(piv.created_at, 'YYYY-MM')
+            ORDER BY month DESC
+          `,
         ]);
 
-        const propertyWorkflow = {
-          pending: propertyPending,
-          approved: propertyApproved,
-          rejected: propertyRejected,
-          draft: propertyDraft,
-        };
+        const propertyTypeIds = propertiesByType
+          .map((pt) => pt.propertyTypeId)
+          .filter(Boolean);
+        const propertyTypes = await prisma.propertyType.findMany({
+          where: { propertyTypeId: { in: propertyTypeIds as number[] } },
+          select: { propertyTypeId: true, propertyName: true },
+        });
+        const typeMap = Object.fromEntries(
+          propertyTypes.map((pt) => [pt.propertyTypeId, pt.propertyName]),
+        );
 
-        const valuationWorkflow = {
-          pending: valuationPending,
-          approved: valuationApproved,
-          rejected: valuationRejected,
-          draft: valuationDraft,
-        };
+        const provinceIds = propertiesByProvince
+          .map((pp) => pp.provinceId)
+          .filter(Boolean);
+        const provinces = await prisma.province.findMany({
+          where: { code: { in: provinceIds } },
+          select: {
+            code: true,
+            nameEn: true,
+          },
+        });
 
-        const indicativeWorkflow = {
-          pending: indicativePending,
-          approved: indicativeApproved,
-          rejected: indicativeRejected,
-          draft: indicativeDraft,
-        };
+        const byStatus: Record<string, number> = {};
+        propertiesByStatus.forEach((item) => {
+          byStatus[item.status] = item._count.status;
+        });
+
+        const byType = propertiesByType.map((item) => ({
+          propertyTypeId: item.propertyTypeId,
+          propertyTypeName: item.propertyTypeId
+            ? typeMap[item.propertyTypeId]
+            : "Unknown",
+          count: item._count.propertyTypeId,
+        }));
+
+        const byProvince = propertiesByProvince.map((item) => ({
+          provinceId: item.provinceId,
+          provinceName: item.provinceId
+            ? provinces.find((province) => province.code === item.provinceId)?.nameEn
+            : "Unknown",
+          count: item._count.provinceId,
+        }));
+
+        const monthlyMap = new Map<
+          string,
+          {
+            month: string;
+            count: number;
+            propertyCount: number;
+            valuationCount: number;
+            indicativeCount: number;
+          }
+        >();
+
+        propertyMonthlyTrend.forEach((item) => {
+          monthlyMap.set(item.month, {
+            month: item.month,
+            count: item.count,
+            propertyCount: item.count,
+            valuationCount: 0,
+            indicativeCount: 0,
+          });
+        });
+
+        valuationMonthlyTrend.forEach((item) => {
+          const existing = monthlyMap.get(item.month);
+          if (existing) {
+            existing.valuationCount = item.count;
+            return;
+          }
+
+          monthlyMap.set(item.month, {
+            month: item.month,
+            count: 0,
+            propertyCount: 0,
+            valuationCount: item.count,
+            indicativeCount: 0,
+          });
+        });
+
+        indicativeMonthlyTrend.forEach((item) => {
+          const existing = monthlyMap.get(item.month);
+          if (existing) {
+            existing.indicativeCount = item.count;
+            return;
+          }
+
+          monthlyMap.set(item.month, {
+            month: item.month,
+            count: 0,
+            propertyCount: 0,
+            valuationCount: 0,
+            indicativeCount: item.count,
+          });
+        });
+
+        const monthlyTrend = Array.from(monthlyMap.values()).sort((a, b) =>
+          b.month.localeCompare(a.month),
+        );
 
         return {
-          pending:
-            propertyWorkflow.pending +
-            valuationWorkflow.pending +
-            indicativeWorkflow.pending,
-          approved:
-            propertyWorkflow.approved +
-            valuationWorkflow.approved +
-            indicativeWorkflow.approved,
-          rejected:
-            propertyWorkflow.rejected +
-            valuationWorkflow.rejected +
-            indicativeWorkflow.rejected,
-          draft:
-            propertyWorkflow.draft +
-            valuationWorkflow.draft +
-            indicativeWorkflow.draft,
-          avgApprovalDays: null,
-          property: propertyWorkflow,
-          valuation: valuationWorkflow,
-          indicativeValuation: indicativeWorkflow,
+          success: true,
+          message: "Property statistics retrieved successfully",
+          data: {
+            overview: {
+              totalProperties,
+              propertiesWithTransactions: transactionCoverageStats.length,
+              propertiesWithValuations: valuationCoverageStats.length,
+              propertiesWithIndicativeValuations:
+                indicativeCoverageStats.length,
+            },
+            byStatus,
+            byType,
+            byProvince,
+            transactions: {
+              total: transactionStats._count.transactionId,
+              averagePrice: transactionStats._avg.totalPrice
+                ? Number(transactionStats._avg.totalPrice)
+                : 0,
+              minPrice: transactionStats._min.totalPrice
+                ? Number(transactionStats._min.totalPrice)
+                : 0,
+              maxPrice: transactionStats._max.totalPrice
+                ? Number(transactionStats._max.totalPrice)
+                : 0,
+            },
+            valuations: {
+              total: valuationStats._count.valuationId,
+              averageMarketValue: valuationStats._avg.marketValue
+                ? Number(valuationStats._avg.marketValue)
+                : 0,
+            },
+            workflow: workflowStats,
+            trends: {
+              monthly: monthlyTrend,
+            },
+          },
         };
-      }),
-
-      // 8. Monthly trend (last 12 months) for dashboard activity
-      prisma.$queryRaw<
-        { month: string; count: number }[]
-      >`
-        SELECT
-          TO_CHAR(created_at, 'YYYY-MM') as month,
-          COUNT(*)::int as count
-        FROM properties
-        WHERE "workflowStatus" != 'ARCHIVED'
-        AND created_at >= NOW() - INTERVAL '12 months'
-        ${filters?.propertyTypeId ? Prisma.sql`AND property_type_id = ${filters.propertyTypeId}` : Prisma.empty}
-        ${filters?.status ? Prisma.sql`AND status::text = ${filters.status}` : Prisma.empty}
-        GROUP BY TO_CHAR(created_at, 'YYYY-MM')
-        ORDER BY month DESC
-      `,
-
-      prisma.$queryRaw<
-        { month: string; count: number }[]
-      >`
-        SELECT
-          TO_CHAR(pv.created_at, 'YYYY-MM') as month,
-          COUNT(*)::int as count
-        FROM property_valuations pv
-        INNER JOIN properties p ON pv.property_id = p.property_id
-        WHERE p."workflowStatus" != 'ARCHIVED'
-        AND pv.created_at >= NOW() - INTERVAL '12 months'
-        ${filters?.propertyTypeId ? Prisma.sql`AND p.property_type_id = ${filters.propertyTypeId}` : Prisma.empty}
-        ${filters?.status ? Prisma.sql`AND p.status::text = ${filters.status}` : Prisma.empty}
-        GROUP BY TO_CHAR(pv.created_at, 'YYYY-MM')
-        ORDER BY month DESC
-      `,
-
-      prisma.$queryRaw<
-        { month: string; count: number }[]
-      >`
-        SELECT
-          TO_CHAR(piv.created_at, 'YYYY-MM') as month,
-          COUNT(*)::int as count
-        FROM property_indicative_valuations piv
-        INNER JOIN properties p ON piv.property_id = p.property_id
-        WHERE p."workflowStatus" != 'ARCHIVED'
-        AND piv.created_at >= NOW() - INTERVAL '12 months'
-        ${filters?.propertyTypeId ? Prisma.sql`AND p.property_type_id = ${filters.propertyTypeId}` : Prisma.empty}
-        ${filters?.status ? Prisma.sql`AND p.status::text = ${filters.status}` : Prisma.empty}
-        GROUP BY TO_CHAR(piv.created_at, 'YYYY-MM')
-        ORDER BY month DESC
-      `,
-    ]);
-
-    // Fetch property type names
-    const propertyTypeIds = propertiesByType.map((pt) => pt.propertyTypeId).filter(Boolean);
-    const propertyTypes = await prisma.propertyType.findMany({
-      where: { propertyTypeId: { in: propertyTypeIds as number[] } },
-      select: { propertyTypeId: true, propertyName: true },
-    });
-    const typeMap = Object.fromEntries(
-      propertyTypes.map((pt) => [pt.propertyTypeId, pt.propertyName])
-    );
-
-    // Fetch province details
-      const provinceIds = propertiesByProvince.map((pp) => pp.provinceId);
-      const provinces = await prisma.province.findMany({
-        where: { code: { in: provinceIds } },
-        select: {
-          code: true,
-          nameEn: true,
-        },
-      });
-
-    // Format results
-    const byStatus: Record<string, number> = {};
-    propertiesByStatus.forEach((item) => {
-      byStatus[item.status] = item._count.status;
-    });
-
-    const byType = propertiesByType.map((item) => ({
-      propertyTypeId: item.propertyTypeId,
-      propertyTypeName: item.propertyTypeId ? typeMap[item.propertyTypeId] : "Unknown",
-      count: item._count.propertyTypeId,
-    }));
-
-    const byProvince = propertiesByProvince.map((item) => ({
-      provinceId: item.provinceId,
-      provinceName: item.provinceId ? provinces.find(p => p.code === item.provinceId)?.nameEn : "Unknown",
-      count: item._count.provinceId,
-    }));
-
-    const monthlyMap = new Map<
-      string,
-      { month: string; count: number; propertyCount: number; valuationCount: number; indicativeCount: number }
-    >();
-
-    propertyMonthlyTrend.forEach((item) => {
-      monthlyMap.set(item.month, {
-        month: item.month,
-        count: item.count,
-        propertyCount: item.count,
-        valuationCount: 0,
-        indicativeCount: 0,
-      });
-    });
-
-    valuationMonthlyTrend.forEach((item) => {
-      const existing = monthlyMap.get(item.month);
-      if (existing) {
-        existing.valuationCount = item.count;
-        return;
-      }
-
-      monthlyMap.set(item.month, {
-        month: item.month,
-        count: 0,
-        propertyCount: 0,
-        valuationCount: item.count,
-        indicativeCount: 0,
-      });
-    });
-
-    indicativeMonthlyTrend.forEach((item) => {
-      const existing = monthlyMap.get(item.month);
-      if (existing) {
-        existing.indicativeCount = item.count;
-        return;
-      }
-
-      monthlyMap.set(item.month, {
-        month: item.month,
-        count: 0,
-        propertyCount: 0,
-        valuationCount: 0,
-        indicativeCount: item.count,
-      });
-    });
-
-    const monthlyTrend = Array.from(monthlyMap.values()).sort((a, b) =>
-      b.month.localeCompare(a.month)
-    );
-
-    return {
-      success: true,
-      message: "Property statistics retrieved successfully",
-      data: {
-        overview: {
-          totalProperties,
-          propertiesWithTransactions: transactionCoverageStats.length,
-          propertiesWithValuations: valuationCoverageStats.length,
-          propertiesWithIndicativeValuations:
-            indicativeCoverageStats.length,
-        },
-        byStatus,
-        byType,
-        byProvince,
-        transactions: {
-          total: transactionStats._count.transactionId,
-          averagePrice: transactionStats._avg.totalPrice
-            ? Number(transactionStats._avg.totalPrice)
-            : 0,
-          minPrice: transactionStats._min.totalPrice
-            ? Number(transactionStats._min.totalPrice)
-            : 0,
-          maxPrice: transactionStats._max.totalPrice
-            ? Number(transactionStats._max.totalPrice)
-            : 0,
-        },
-        valuations: {
-          total: valuationStats._count.valuationId,
-          averageMarketValue: valuationStats._avg.marketValue
-            ? Number(valuationStats._avg.marketValue)
-            : 0,
-        },
-        workflow: workflowStats,
-        trends: {
-          monthly: monthlyTrend,
-        },
       },
-    };
+    );
   } 
 
     
@@ -2817,6 +2957,8 @@ export class PropertyService {
       submittedBy: userId,
     });
 
+    await invalidatePropertyStatisticsCache();
+
     return {
       success: true,
       message: "Property submitted for review successfully",
@@ -2879,6 +3021,8 @@ export class PropertyService {
       property: updatedProperty,
       approvedBy: approvedById,
     });
+
+    await invalidatePropertyStatisticsCache();
 
     return {
       success: true,
@@ -2944,6 +3088,8 @@ export class PropertyService {
       reason,
     });
 
+    await invalidatePropertyStatisticsCache();
+
     return {
       success: true,
       message: "Property rejected successfully",
@@ -2978,6 +3124,8 @@ export class PropertyService {
       include: includeForProperty,
     });
 
+    await invalidatePropertyStatisticsCache();
+
     return {
       success: true,
       message: "Property archived successfully",
@@ -3011,6 +3159,8 @@ export class PropertyService {
       },
       include: includeForProperty,
     });
+
+    await invalidatePropertyStatisticsCache();
 
     return {
       success: true,

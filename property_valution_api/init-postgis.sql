@@ -3,6 +3,7 @@
 
 -- Enable PostGIS extension
 CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- Verify PostGIS installation
 SELECT PostGIS_version();
@@ -19,5 +20,5 @@ $$ LANGUAGE plpgsql;
 -- Log success
 DO $$
 BEGIN
-    RAISE NOTICE '✅ PostGIS extension enabled successfully!';
+    RAISE NOTICE '✅ PostGIS and pg_trgm extensions enabled successfully!';
 END $$;

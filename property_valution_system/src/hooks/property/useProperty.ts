@@ -52,17 +52,14 @@ export function useProperties(params: ApiParams = {}) {
     staleTime: 30_000,
     gcTime: 5 * 60_000,
     retry: 1,
+    placeholderData: (previousData) => previousData,
   });
 }
 
 export function useProperty(id: number, enabled = true) {
   return useQuery({
     queryKey: propertyKeys.detail(id),
-    queryFn: async () => {
-      const data = await propertyApi.getPropertyById(id);
-      console.log("Property view data:", { id, data });
-      return data;
-    },
+    queryFn: () => propertyApi.getPropertyById(id),
     enabled: enabled && !!id,
     staleTime: 60_000,
   });

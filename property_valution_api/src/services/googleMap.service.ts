@@ -1,5 +1,7 @@
 import { Client } from "@googlemaps/google-maps-services-js";
 import { config } from "../config";
+import { cacheService } from "./cache/cache.service";
+import { cacheKeys } from "./cache/cacheKeys";
 
 // Initialize Google Maps Client
 const googleMapsClient = new Client({});
@@ -275,24 +277,52 @@ const geocodeAddress = async (
   formattedAddress: string;
   placeId: string;
 }> => {
-  try {
-    const geocodeQuery = normalizeGeocodeQuery(address);
-    const plusCodeLocality = extractPlusCodeLocality(address);
-    let localityFallbackResult: any | null = null;
-    let biasBounds:
-      | {
-          northeast: { lat: number; lng: number };
-          southwest: { lat: number; lng: number };
-        }
-      | undefined;
-
-    if (extractPlusCode(address) && plusCodeLocality) {
+  return await cacheService.getOrSetJson(
+    cacheKeys.googleMaps.geocode(address),
+    config.redis.geocodeTtlSeconds,
+    async () => {
       try {
-        const localityResponse = await googleMapsClient.geocode({
+        const geocodeQuery = normalizeGeocodeQuery(address);
+        const plusCodeLocality = extractPlusCodeLocality(address);
+        let localityFallbackResult: any | null = null;
+        let biasBounds:
+          | {
+              northeast: { lat: number; lng: number };
+              southwest: { lat: number; lng: number };
+            }
+          | undefined;
+
+        if (extractPlusCode(address) && plusCodeLocality) {
+          try {
+            const localityResponse = await googleMapsClient.geocode({
+              params: {
+                address: `${plusCodeLocality}, Cambodia`,
+                region: "kh",
+                language: KHMER_CHAR_PATTERN.test(plusCodeLocality) ? "km" : "en",
+                components: {
+                  country: "KH",
+                },
+                key: getApiKey(),
+              },
+            });
+
+            const localityResult = localityResponse.data.results[0];
+            localityFallbackResult = localityResult ?? null;
+            biasBounds = buildLocationBiasBounds(
+              localityResult?.geometry?.viewport,
+              localityResult?.geometry?.location
+            );
+          } catch {
+            biasBounds = undefined;
+          }
+        }
+
+        const response = await googleMapsClient.geocode({
           params: {
-            address: `${plusCodeLocality}, Cambodia`,
+            address: geocodeQuery,
+            ...(biasBounds ? { bounds: biasBounds } : {}),
             region: "kh",
-            language: KHMER_CHAR_PATTERN.test(plusCodeLocality) ? "km" : "en",
+            language: KHMER_CHAR_PATTERN.test(address) ? "km" : "en",
             components: {
               country: "KH",
             },
@@ -300,53 +330,31 @@ const geocodeAddress = async (
           },
         });
 
-        const localityResult = localityResponse.data.results[0];
-        localityFallbackResult = localityResult ?? null;
-        biasBounds = buildLocationBiasBounds(
-          localityResult?.geometry?.viewport,
-          localityResult?.geometry?.location
-        );
-      } catch {
-        biasBounds = undefined;
+        if (response.data.results.length === 0) {
+          throw new Error("No results found");
+        }
+
+        let result = selectBestGeocodeResult(response.data.results, address);
+        if (!result) {
+          throw new Error("No suitable results found");
+        }
+
+        if (!matchesPlusCodeLocality(result, address) && localityFallbackResult) {
+          result = localityFallbackResult;
+        }
+
+        const location = result.geometry.location;
+        return {
+          latitude: location.lat,
+          longitude: location.lng,
+          formattedAddress: result.formatted_address,
+          placeId: result.place_id,
+        };
+      } catch (error) {
+        throw new Error("Geocoding failed: " + (error as Error).message);
       }
     }
-
-    const response = await googleMapsClient.geocode({
-      params: {
-        address: geocodeQuery,
-        ...(biasBounds ? { bounds: biasBounds } : {}),
-        region: "kh",
-        language: KHMER_CHAR_PATTERN.test(address) ? "km" : "en",
-        components: {
-          country: "KH",
-        },
-        key: getApiKey(),
-      },
-    });
-
-    if (response.data.results.length === 0) {
-      throw new Error("No results found");
-    }
-
-    let result = selectBestGeocodeResult(response.data.results, address);
-    if (!result) {
-      throw new Error("No suitable results found");
-    }
-
-    if (!matchesPlusCodeLocality(result, address) && localityFallbackResult) {
-      result = localityFallbackResult;
-    }
-
-    const location = result.geometry.location;
-    return {
-      latitude: location.lat,
-      longitude: location.lng,
-      formattedAddress: result.formatted_address,
-      placeId: result.place_id,
-    };
-  } catch (error) {
-    throw new Error("Geocoding failed: " + (error as Error).message);
-  }
+  );
 };
 
 // Reverse geocode coordinates to address
@@ -358,28 +366,34 @@ const reverseGeocode = async (
   addressComponents: any[];
   placeId: string;
 } | null> => {
-  try {
-    const response = await googleMapsClient.reverseGeocode({
-      params: {
-        latlng: { lat: latitude, lng: longitude },
-        key: getApiKey(),
-      },
-    });
+  return await cacheService.getOrSetJson(
+    cacheKeys.googleMaps.reverseGeocode(latitude, longitude),
+    config.redis.geocodeTtlSeconds,
+    async () => {
+      try {
+        const response = await googleMapsClient.reverseGeocode({
+          params: {
+            latlng: { lat: latitude, lng: longitude },
+            key: getApiKey(),
+          },
+        });
 
-    if (response.data.results.length === 0) {
-      throw new Error("No results found");
+        if (response.data.results.length === 0) {
+          throw new Error("No results found");
+        }
+
+        const result = response.data.results[0];
+
+        return {
+          formattedAddress: result.formatted_address,
+          addressComponents: result.address_components,
+          placeId: result.place_id,
+        };
+      } catch (error) {
+        throw new Error("Reverse geocoding failed: " + (error as Error).message);
+      }
     }
-
-    const result = response.data.results[0];
-
-    return {
-      formattedAddress: result.formatted_address,
-      addressComponents: result.address_components,
-      placeId: result.place_id,
-    };
-  } catch (error) {
-    throw new Error("Reverse geocoding failed: " + (error as Error).message);
-  }
+  );
 };
 
 // Parse address components into structured format

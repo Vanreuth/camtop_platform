@@ -51,6 +51,7 @@ import {
   sumComponentValueRangeNumber,
   shouldAutoComputeChargeFee,
 } from "./indicativeValuation.calculation";
+import { invalidatePropertyStatisticsCache } from "../../services/cache/propertyStatisticsCache";
 
 const propertyCodeService = createPropertyCodeService(prisma as any);
 const propertyUploadService = createPropertyUploadService(FileUploadService as any);
@@ -988,6 +989,8 @@ export const indicativeValuationService = {
       valuation.indicativeComponents?.[0] ??
       null;
 
+    await invalidatePropertyStatisticsCache();
+
     return {
       valuation,
       indication: valuation,
@@ -1040,6 +1043,8 @@ export const indicativeValuationService = {
       valuation: result,
       submittedBy: userId,
     });
+
+    await invalidatePropertyStatisticsCache();
 
     return {
       success: true,
@@ -1100,6 +1105,8 @@ export const indicativeValuationService = {
       notes: dto.notes,
     });
 
+    await invalidatePropertyStatisticsCache();
+
     return {
       success: true,
       message: "Indicative valuation approved successfully",
@@ -1146,6 +1153,8 @@ export const indicativeValuationService = {
       rejectedBy: rejectorId,
       rejectionReason: dto.rejectionReason,
     });
+
+    await invalidatePropertyStatisticsCache();
 
     return {
       success: true,
@@ -1596,6 +1605,8 @@ export const indicativeValuationService = {
       });
     });
 
+    await invalidatePropertyStatisticsCache();
+
     return {
       success: true,
       message: "Indicative valuation updated successfully",
@@ -1720,6 +1731,8 @@ export const indicativeValuationService = {
         },
       });
     });
+
+    await invalidatePropertyStatisticsCache();
 
     return {
       success: true,

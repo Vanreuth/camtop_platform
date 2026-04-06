@@ -7,7 +7,7 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [postgis]
+  extensions = [postgis, pg_trgm]
 }
 
 enum AccountStatus {
@@ -464,8 +464,14 @@ model Property {
   comparable        Comparable[]
 
   @@index([propertyTypeId])
+  @@index([propertySubtypeId], map: "idx_properties_property_subtype_id")
   @@index([status])
+  @@index([workflowStatus], map: "idx_properties_workflow_status")
   @@index([createdBy])
+  @@index([workflowStatus, createdBy, createdAt], map: "idx_properties_workflow_created_by_created_at")
+  @@index([workflowStatus, propertyTypeId, createdAt], map: "idx_properties_workflow_property_type_created_at")
+  @@index([workflowStatus, propertySubtypeId, createdAt], map: "idx_properties_workflow_property_subtype_created_at")
+  @@index([workflowStatus, status, createdAt], map: "idx_properties_workflow_status_created_at")
   @@map("properties")
 }
 

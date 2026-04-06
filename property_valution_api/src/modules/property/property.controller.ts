@@ -603,12 +603,15 @@ export class PropertyController {
 	 * GET /api/properties/statistics
 	 */
 	static async getPropertyStatistics(req: Request, res: Response) {
+		const parseString = (value: unknown) =>
+			typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+
 		const filters = {
 			startDate: req.query.startDate ? new Date(req.query.startDate as string) : undefined,
 			endDate: req.query.endDate ? new Date(req.query.endDate as string) : undefined,
 			propertyTypeId: req.query.propertyTypeId ? parseInt(req.query.propertyTypeId as string) : undefined,
-			provinceId: req.query.provinceId ? parseInt(req.query.provinceId as string) : undefined,
-			status: req.query.status as string | undefined,
+			provinceId: parseString(req.query.provinceId),
+			status: parseString(req.query.status),
 		};
 
 		const statistics = await propertyService.getPropertyStatistics(filters);

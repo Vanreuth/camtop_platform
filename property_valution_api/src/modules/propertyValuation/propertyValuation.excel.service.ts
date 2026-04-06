@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 import { prisma } from "../../db/prisma";
 import { BadRequestError } from "../../common/errors/badRequest.error";
+import { invalidatePropertyStatisticsCache } from "../../services/cache/propertyStatisticsCache";
 
 export type PropertyValuationExcelExportFilters = {
   status?: PropertyValuationStatus;
@@ -756,6 +757,10 @@ export const importPropertyValuationsFromExcel = async (
         message: error instanceof Error ? error.message : "Unknown import error",
       });
     }
+  }
+
+  if (created > 0 || updated > 0) {
+    await invalidatePropertyStatisticsCache();
   }
 
   return {

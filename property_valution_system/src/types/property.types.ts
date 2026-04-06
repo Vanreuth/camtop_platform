@@ -467,7 +467,7 @@ export interface PropertyStatisticsFilters {
   startDate?: string;
   endDate?: string;
   propertyTypeId?: number;
-  provinceId?: number;
+  provinceId?: string;
   status?: string;
 }
 

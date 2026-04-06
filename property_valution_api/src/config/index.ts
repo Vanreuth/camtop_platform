@@ -18,6 +18,15 @@ export const config = {
     name: env.POSTGRES_DB,
   },
 
+  redis: {
+    url: env.REDIS_URL,
+    connectTimeoutMs: env.REDIS_CONNECT_TIMEOUT_MS,
+    addressTtlSeconds: env.CACHE_ADDRESS_TTL_SECONDS,
+    propertyTypeTtlSeconds: env.CACHE_PROPERTY_TYPE_TTL_SECONDS,
+    propertyStatsTtlSeconds: env.CACHE_PROPERTY_STATS_TTL_SECONDS,
+    geocodeTtlSeconds: env.CACHE_GEOCODE_TTL_SECONDS,
+  },
+
   jwt: {
     secret: env.JWT_SECRET,
     expiresIn: env.JWT_EXPIRES_IN || "15m",
