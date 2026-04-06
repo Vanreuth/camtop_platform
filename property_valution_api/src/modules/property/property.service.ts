@@ -842,8 +842,7 @@ export class PropertyService {
   let newWorkflowStatus: WorkflowStatus | undefined = data.workflowStatus;
   if (
     existing.workflowStatus === WorkflowStatus.REJECTED &&
-    newWorkflowStatus === undefined &&
-    !data.status
+    newWorkflowStatus === undefined
   ) {
     newWorkflowStatus = WorkflowStatus.DRAFT;
   }

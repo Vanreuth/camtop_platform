@@ -26,7 +26,6 @@ export const propertyValuationKeys = {
 };
 
 export function usePropertyValuations(params: PropertyValuationQueryParams = {}) {
-  console.log("PropertyValuations params:", params);
   return useQuery({
     queryKey: propertyValuationKeys.list(params),
     queryFn: () => propertyValuationApi.getPropertyValuations(params),
