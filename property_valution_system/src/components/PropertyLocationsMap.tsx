@@ -1046,35 +1046,16 @@ useEffect(() => {
         propertyTypeName,
       });
       const layerOffset = MARKER_LAYER_PIXEL_OFFSETS[layer];
-      pin.element.style.transform = `translate(${layerOffset.x}px, ${layerOffset.y}px)`;
+      pin.style.transform = `translate(${layerOffset.x}px, ${layerOffset.y}px)`;
       const marker = new google.maps.marker.AdvancedMarkerElement({
         position,
         map,
         title: `${property.propertyName} (${layer})`,
-        content: pin.element,
+        content: pin,
+        gmpClickable: true,
         zIndex: MARKER_LAYER_Z_INDEX[layer],
       });
-      marker.addListener("mouseover", () => setHoveredProperty(property));
-      marker.addListener("mouseout", () => setHoveredProperty(null));
-      marker.addListener("mouseover", () => {
-        const hoverPin = getAdvancedMarkerPin(property.status, 1.15, {
-          hasValuation: property.hasValuation,
-          hasIndicativeValuation: property.hasIndicativeValuation,
-          propertyTypeName,
-        });
-        hoverPin.element.style.transform = `translate(${layerOffset.x}px, ${layerOffset.y}px)`;
-        marker.content = hoverPin.element;
-      });
-      marker.addListener("mouseout", () => {
-        const normalPin = getAdvancedMarkerPin(property.status, 1, {
-          hasValuation: property.hasValuation,
-          hasIndicativeValuation: property.hasIndicativeValuation,
-          propertyTypeName,
-        });
-        normalPin.element.style.transform = `translate(${layerOffset.x}px, ${layerOffset.y}px)`;
-        marker.content = normalPin.element;
-      });
-      marker.addListener("click", () => {
+      const handleMarkerClick: EventListener = () => {
         if (activeInfoWindowRef.current) {
           activeInfoWindowRef.current.close();
         }
@@ -1092,7 +1073,28 @@ useEffect(() => {
         });
         infoWindow.open({ map, anchor: marker });
         activeInfoWindowRef.current = infoWindow;
+      };
+      marker.addListener("mouseover", () => setHoveredProperty(property));
+      marker.addListener("mouseout", () => setHoveredProperty(null));
+      marker.addListener("mouseover", () => {
+        const hoverPin = getAdvancedMarkerPin(property.status, 1.15, {
+          hasValuation: property.hasValuation,
+          hasIndicativeValuation: property.hasIndicativeValuation,
+          propertyTypeName,
+        });
+        hoverPin.style.transform = `translate(${layerOffset.x}px, ${layerOffset.y}px)`;
+        marker.content = hoverPin;
       });
+      marker.addListener("mouseout", () => {
+        const normalPin = getAdvancedMarkerPin(property.status, 1, {
+          hasValuation: property.hasValuation,
+          hasIndicativeValuation: property.hasIndicativeValuation,
+          propertyTypeName,
+        });
+        normalPin.style.transform = `translate(${layerOffset.x}px, ${layerOffset.y}px)`;
+        marker.content = normalPin;
+      });
+      marker.addEventListener("gmp-click", handleMarkerClick);
       newMarkers.push(marker);
     });
     setMarkers(newMarkers);

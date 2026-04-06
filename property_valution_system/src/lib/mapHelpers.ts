@@ -690,7 +690,7 @@ export function getAdvancedMarkerPin(
     hasIndicativeValuation?: boolean;
     propertyTypeName?: string;
   }
-): google.maps.marker.PinElement {
+): HTMLElement {
   const color = getMarkerColors(status);
   const hasValuation = !!options?.hasValuation;
   const hasIndicativeValuation = !!options?.hasIndicativeValuation;
@@ -712,13 +712,30 @@ export function getAdvancedMarkerPin(
       ? indicativeDangerBorder
       : color.stroke;
 
-  return new google.maps.marker.PinElement({
+  const pin = new google.maps.marker.PinElement({
     background,
     borderColor,
-    glyphColor: "#ffffff",
-    glyph: glyphElement,
     scale,
   });
+
+  if (!glyphElement) {
+    return pin;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.style.position = "relative";
+  wrapper.style.display = "inline-block";
+  wrapper.style.transformOrigin = "bottom center";
+
+  glyphElement.style.position = "absolute";
+  glyphElement.style.left = "50%";
+  glyphElement.style.top = "38%";
+  glyphElement.style.transform = "translate(-50%, -50%)";
+  glyphElement.style.pointerEvents = "none";
+
+  wrapper.append(pin, glyphElement);
+
+  return wrapper;
 }
 /**
  * Fit map bounds with smart zoom limits and smooth animation
