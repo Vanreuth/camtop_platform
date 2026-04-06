@@ -176,9 +176,17 @@ export class PropertyController {
 		const userId = req.user?.id;
 		if (!userId) throw new ForbiddenError("User not authenticated");
 
+		const userHierarchyLevel = Math.min(
+			...req.user!.roles.map((r) => r.hierarchyLevel)
+		);
+
 		const body = { ...req.body, createdBy: userId };
 		const files = req.files as FileField;
-		const createdProperty = await propertyService.createProperty(body, files);
+		const createdProperty = await propertyService.createProperty(
+			body,
+			files,
+			userHierarchyLevel
+		);
 		return successResponse(res, 201, { property: createdProperty }, "Property created successfully");
 	}
 

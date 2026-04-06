@@ -472,7 +472,11 @@ export class PropertyService {
 }
 
   
-  async createProperty(data: CreatePropertyDto, files?: FileField) {
+  async createProperty(
+    data: CreatePropertyDto,
+    files?: FileField,
+    userHierarchyLevel = 99,
+  ) {
   if (!data.propertyTypeId) throw new BadRequestError("Property type is required");
   if (!data.createdBy) throw new BadRequestError("Created by user ID is required");
   if (!data.transaction?.totalPrice) throw new BadRequestError("Transaction totalPrice is required");
@@ -488,6 +492,29 @@ export class PropertyService {
 
   const actorUserId = data.createdBy;
   if( !actorUserId ) throw new BadRequestError("Unauthorized");
+  const isPrivileged = userHierarchyLevel <= 2;
+
+  if (!isPrivileged) {
+    if (data.status !== undefined && data.status !== PropertyStatus.ACTIVE) {
+      throw new ForbiddenError("Only admins/managers can set property status");
+    }
+
+    if (
+      data.workflowStatus !== undefined &&
+      data.workflowStatus !== WorkflowStatus.DRAFT
+    ) {
+      throw new ForbiddenError(
+        "Only admins/managers can set property workflow status",
+      );
+    }
+  }
+
+  const propertyStatus = isPrivileged
+    ? (data.status ?? PropertyStatus.ACTIVE)
+    : PropertyStatus.ACTIVE;
+  const propertyWorkflowStatus = isPrivileged
+    ? (data.workflowStatus ?? WorkflowStatus.DRAFT)
+    : WorkflowStatus.DRAFT;
 
 
   // Manual overrides (authoritative for “length/height” display)
@@ -589,8 +616,8 @@ export class PropertyService {
         propertyTypeId: data.propertyTypeId,
         propertySubtypeId: data.propertySubtypeId ?? null,
         currentUseId: data.currentUseId ?? null,
-        status: PropertyStatus.ACTIVE,
-        workflowStatus: WorkflowStatus.DRAFT,
+        status: propertyStatus,
+        workflowStatus: propertyWorkflowStatus,
         description: normalizeOptionalDescription(data.description) ?? null,
         createdBy: data.createdBy,
         updatedBy: data.createdBy,
@@ -776,6 +803,21 @@ export class PropertyService {
     throw new ForbiddenError("You do not have permission to update this property");
   }
 
+  if (!isAdminOrManager) {
+    if (data.status !== undefined && data.status !== existing.status) {
+      throw new ForbiddenError("Only admins/managers can change property status");
+    }
+
+    if (
+      data.workflowStatus !== undefined &&
+      data.workflowStatus !== existing.workflowStatus
+    ) {
+      throw new ForbiddenError(
+        "Only admins/managers can change property workflow status",
+      );
+    }
+  }
+
   // 3. Status Lock Check
   // Admins/Managers (level <= 2) can usually bypass the "Draft/Rejected" requirement
   const canBypassStatusLock = userHierarchyLevel <= 2; 
@@ -792,8 +834,12 @@ export class PropertyService {
   }
   
   // Auto-convert REJECTED to DRAFT when editing (like propertyValuation)
-  let newWorkflowStatus: WorkflowStatus | undefined;
-  if (existing.workflowStatus === WorkflowStatus.REJECTED && !data.status) {
+  let newWorkflowStatus: WorkflowStatus | undefined = data.workflowStatus;
+  if (
+    existing.workflowStatus === WorkflowStatus.REJECTED &&
+    newWorkflowStatus === undefined &&
+    !data.status
+  ) {
     newWorkflowStatus = WorkflowStatus.DRAFT;
   }
 
