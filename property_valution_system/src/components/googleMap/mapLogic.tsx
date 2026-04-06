@@ -1957,7 +1957,7 @@ const renderLayer = useCallback(
 
             <ToastUI toast={toast} />
 
-            {!mapId && (
+            {process.env.NODE_ENV === "development" && !mapId && (
               <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 bg-yellow-50 border border-yellow-300 text-yellow-900 px-3 py-2 rounded-lg text-xs shadow pointer-events-none">
                 No <b>mapId</b> provided — using legacy google.maps.Marker fallback.
               </div>

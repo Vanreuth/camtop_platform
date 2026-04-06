@@ -88,6 +88,21 @@ const formatMoney = (value?: number | string | null, currency = "USD") => {
   }
 };
 
+const formatMoneyRange = (
+  minValue?: number | string | null,
+  maxValue?: number | string | null,
+  currency = "USD",
+) => {
+  const minLabel = formatMoney(minValue, currency);
+  const maxLabel = formatMoney(maxValue, currency);
+
+  if (minLabel === "-" && maxLabel === "-") return "-";
+  if (minLabel === maxLabel) return minLabel;
+  if (minLabel === "-") return maxLabel;
+  if (maxLabel === "-") return minLabel;
+  return `${minLabel} - ${maxLabel}`;
+};
+
 const formatNumber = (value?: number | string | null, digits = 0) => {
   if (value === null || value === undefined || value === "") return "-";
   const numeric = typeof value === "string" ? Number(value) : value;
@@ -97,6 +112,26 @@ const formatNumber = (value?: number | string | null, digits = 0) => {
     minimumFractionDigits: digits,
   }).format(numeric);
 };
+
+const getAddressNodeLabel = (
+  value?:
+    | {
+        provinceName?: string | null;
+        districtName?: string | null;
+        communeName?: string | null;
+        villageName?: string | null;
+        nameEn?: string | null;
+        nameKh?: string | null;
+      }
+    | null,
+) =>
+  value?.villageName ||
+  value?.communeName ||
+  value?.districtName ||
+  value?.provinceName ||
+  value?.nameEn ||
+  value?.nameKh ||
+  "";
 
 const workflowBadgeClass: Record<string, string> = {
   DRAFT: "border-slate-200 bg-slate-100 text-slate-700",
@@ -171,23 +206,41 @@ export default function PropertyIndicativeValuationDetailPage() {
       : username.slice(0, 2).toUpperCase();
   }, [valuation]);
 
-  const addressLine = useMemo(() => {
-    const province =
-      valuation?.property?.propertyAddress?.province?.provinceName ||
-      valuation?.property?.propertyAddress?.province?.nameEn ||
-      valuation?.property?.propertyAddress?.province?.nameKh;
-    const district =
-      valuation?.property?.propertyAddress?.district?.districtName ||
-      valuation?.property?.propertyAddress?.district?.nameEn ||
-      valuation?.property?.propertyAddress?.district?.nameKh;
-    return [district, province].filter(Boolean).join(", ") || "-";
-  }, [valuation]);
+  const propertyAddress = valuation?.property?.propertyAddress;
   const formattedAddress = useMemo(() => {
     const location = valuation?.property?.propertyLocation as
       | { formattedAddress?: string | null }
       | undefined;
     return location?.formattedAddress || "";
   }, [valuation]);
+  const addressSummary = useMemo(() => {
+    const district = getAddressNodeLabel(propertyAddress?.district);
+    const province = getAddressNodeLabel(propertyAddress?.province);
+    return [district, province].filter(Boolean).join(", ") || formattedAddress || "-";
+  }, [formattedAddress, propertyAddress?.district, propertyAddress?.province]);
+  const propertyAddressLabel = useMemo(() => {
+    const parts = [
+      propertyAddress?.houseNo ? `#${propertyAddress.houseNo}` : "",
+      propertyAddress?.street || "",
+      getAddressNodeLabel(propertyAddress?.village),
+      getAddressNodeLabel(propertyAddress?.commune),
+      getAddressNodeLabel(propertyAddress?.district),
+      getAddressNodeLabel(propertyAddress?.province),
+    ]
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (parts.length > 0) return parts.join(", ");
+    return formattedAddress || "-";
+  }, [
+    formattedAddress,
+    propertyAddress?.commune,
+    propertyAddress?.district,
+    propertyAddress?.houseNo,
+    propertyAddress?.province,
+    propertyAddress?.street,
+    propertyAddress?.village,
+  ]);
   const latLng = useMemo(() => {
     const location = valuation?.property?.propertyLocation as
       | { latitude?: number | string | null; longitude?: number | string | null }
@@ -205,7 +258,7 @@ export default function PropertyIndicativeValuationDetailPage() {
     if (!latLng) return null;
     return `https://www.google.com/maps?q=${latLng.lat},${latLng.lng}&z=18`;
   }, [latLng, valuation]);
-  const locationText = addressLine !== "-" ? addressLine : formattedAddress || "";
+  const locationText = propertyAddressLabel !== "-" ? propertyAddressLabel : formattedAddress || "";
   const propertyId = valuation?.propertyId || valuation?.property?.propertyId;
   const hasLocation = Boolean(valuation?.property?.propertyLocation);
   const {
@@ -238,10 +291,20 @@ export default function PropertyIndicativeValuationDetailPage() {
     : t("businessStatus.ACTIVE");
   const contactName = valuation?.contactName || valuation?.property?.dataSource?.contactName || "-";
   const contactTel = valuation?.contactTel || valuation?.property?.dataSource?.phoneNumber || "-";
+  const accessValueMin =
+    valuation?.minAccessValue ?? totalIndicativeMinValue ?? valuation?.accessValue ?? null;
+  const accessValueMax =
+    valuation?.maxAccessValue ?? totalIndicativeMaxValue ?? valuation?.accessValue ?? null;
+  const accessValueLabel =
+    formatMoneyRange(accessValueMin, accessValueMax, valuation?.currency ?? "USD");
+  const feeRateLabel =
+    valuation?.feeRate != null ? `${formatNumber(valuation.feeRate, 4)}%` : "-";
+  const discountLabel =
+    valuation?.discount != null ? `${formatNumber(valuation.discount, 2)}%` : "-";
+  const chargeFeeMin = valuation?.minChargeFee ?? valuation?.chargeFee ?? null;
+  const chargeFeeMax = valuation?.maxChargeFee ?? valuation?.chargeFee ?? null;
   const chargeFeeLabel =
-    valuation?.chargeFee != null
-      ? formatMoney(valuation.chargeFee, valuation.currency ?? "USD")
-      : "-";
+    formatMoneyRange(chargeFeeMin, chargeFeeMax, valuation?.currency ?? "USD");
 
   const handleSubmit = useCallback(() => {
     if (!valuation) return;
@@ -351,7 +414,7 @@ export default function PropertyIndicativeValuationDetailPage() {
                         <span>{propertyLabel}</span>
                         <span className="text-border">•</span>
                         <MapPin className="h-4 w-4" />
-                        <span>{addressLine}</span>
+                        <span>{addressSummary}</span>
                       </div>
                     </>
                   ) : null}
@@ -435,24 +498,41 @@ export default function PropertyIndicativeValuationDetailPage() {
 
           {valuation ? (
             <div className="space-y-6">
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+
                 <Card className="border-primary/10 bg-primary/5">
                   <CardContent className="pt-6">
                     <div className="flex items-center gap-3">
                       <div className="rounded-2xl bg-primary/10 p-3 text-primary">
-                        <TrendingUp className="h-5 w-5" />
+                        <DollarSign className="h-5 w-5" />
                       </div>
                       <div>
-                        <div className="text-sm text-muted-foreground">{t("summary.totalRange")}</div>
-                        <div className="text-lg font-semibold">
-                          {`${formatMoney(totalIndicativeMinValue, valuation.currency ?? "USD")} - ${formatMoney(totalIndicativeMaxValue, valuation.currency ?? "USD")}`}
-                        </div>
+                        <div className="text-sm text-muted-foreground">{t("fields.accessValueRange")}</div>
+                        <div className="text-lg font-semibold">{accessValueLabel}</div>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
 
-                
+                <Card className="border-primary/10 bg-primary/5">
+                  <CardContent className="pt-6">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-2xl bg-primary/10 p-3 text-primary">
+                        <DollarSign className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">{t("fields.chargeFeeRange")}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {t("summary.feeChargeFormula", {
+                            rate: Number(valuation.feeRate ?? 0).toFixed(4),
+                            discount: Number(valuation.discount ?? 0).toFixed(2),
+                          })}
+                        </div>
+                        <div className="text-lg font-semibold">{chargeFeeLabel}</div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
 
                 <Card className="border-primary/10 bg-primary/5">
                   <CardContent className="pt-6">
@@ -534,7 +614,19 @@ export default function PropertyIndicativeValuationDetailPage() {
                         <div className="font-medium">{contactTel}</div>
                       </div>
                       <div>
-                        <div className="text-sm text-muted-foreground">{t("fields.chargeFee")}</div>
+                        <div className="text-sm text-muted-foreground">{t("fields.accessValueRange")}</div>
+                        <div className="font-medium">{accessValueLabel}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">{t("fields.feeRate")}</div>
+                        <div className="font-medium">{feeRateLabel}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">{t("fields.discount")}</div>
+                        <div className="font-medium">{discountLabel}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">{t("fields.chargeFeeRange")}</div>
                         <div className="font-medium">{chargeFeeLabel}</div>
                       </div>
                       </CardContent>
@@ -549,7 +641,12 @@ export default function PropertyIndicativeValuationDetailPage() {
                     </CardHeader>
                     <CardContent className="space-y-4 pt-6">
                       {locationText ? (
-                        <p className="text-sm text-muted-foreground">{locationText}</p>
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium text-foreground">{locationText}</p>
+                          {formattedAddress && formattedAddress !== locationText ? (
+                            <p className="text-sm text-muted-foreground">{formattedAddress}</p>
+                          ) : null}
+                        </div>
                       ) : (
                         <p className="text-sm text-muted-foreground">No address available.</p>
                       )}
@@ -801,7 +898,7 @@ export default function PropertyIndicativeValuationDetailPage() {
                         <div className="text-sm text-muted-foreground">{tc("details")}</div>
                         <div className="mt-1 flex items-start gap-2 text-sm">
                           <MapPin className="mt-0.5 h-4 w-4 text-muted-foreground" />
-                          <span>{addressLine}</span>
+                          <span>{propertyAddressLabel}</span>
                         </div>
                       </div>
                     </CardContent>

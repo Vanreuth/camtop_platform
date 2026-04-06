@@ -24,6 +24,10 @@ const positiveDecimal = z
     message: "Must be a non-negative number",
   });
 
+const percentageDecimal = positiveDecimal.refine((value) => value <= 100, {
+  message: "Must be between 0 and 100",
+});
+
 const geoJsonCoordinateSchema = z.tuple([z.number(), z.number()]);
 
 const geoJsonPolygonSchema = z.object({
@@ -125,6 +129,9 @@ const sharedIndicativeFields = {
   preparedFor: z.string().max(255).optional(),
   contactName: z.string().max(255).optional(),
   contactTel: z.string().max(50).optional(),
+  accessValue: positiveDecimal.nullable().optional(),
+  feeRate: percentageDecimal.nullable().optional(),
+  discount: percentageDecimal.nullable().optional(),
   chargeFee: positiveDecimal.nullable().optional(),
   valuerId: z.number().int().positive().optional(),
   inspectorName: z.string().max(100).optional(),
@@ -136,7 +143,7 @@ const sharedIndicativeFields = {
   expiryDate: z.coerce.date().optional(),
   intendedUse: z.string().max(255).optional(),
   purposeOfValuation: z.string().optional(),
-  forcedSalePercent: positiveDecimal.nullable().optional(),
+  forcedSalePercent: percentageDecimal.nullable().optional(),
   note: z.string().optional(),
   internalNotes: z.string().optional(),
 };

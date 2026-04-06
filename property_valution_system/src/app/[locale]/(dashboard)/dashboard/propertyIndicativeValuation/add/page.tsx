@@ -11,6 +11,7 @@ import { usePropertyTypes } from "@/hooks/usePropertyTypes";
 import { getApiErrorDescription, getApiErrorMessage } from "@/utils/helpers";
 import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
 import { PropertyNavigationFooter } from "@/components/property/PropertyNavigationFooter";
+import { IndicativeValuationFinancialPanel } from "@/components/property/IndicativeValuationFinancialPanel";
 import { AddressTab } from "@/components/property/AddressTab";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -43,6 +44,12 @@ import { useAuth } from "@/hooks/auth/useAuth";
 import { useUsers } from "@/hooks/user/useUser";
 import { useCreateIndicativeValuation } from "@/hooks/indicativeValuation/useIndicativeValuation";
 import { indicativeValuationApi } from "@/hooks/indicativeValuation/indicativeValuation.api";
+import {
+  calculateIndicativeMetrics,
+  createComponentDraft,
+  parseNullableNumber,
+  type IndicativeComponentDraftValue,
+} from "@/hooks/indicativeValuation/indicativeValuation.form";
 import type { GeoJsonPolygon } from "@/hooks/propertyValuation/propertyValuation.types";
 import { DEFAULT_ADDRESS_CODES } from "@/constants/propertyConstants";
 import type { AddressCodes } from "@/hooks/property/property.types";
@@ -59,7 +66,6 @@ import type { ResolvedAddressHierarchyItems } from "@/types/propertyAddress.type
 import {
   Building2,
   ClipboardList,
-  DollarSign,
   Image as ImageIcon,
   Plus,
   Receipt,
@@ -111,7 +117,9 @@ const schema = z.object({
   instructedBy: z.string().optional(),
   contactName: z.string().optional(),
   contactTel: z.string().optional(),
-  chargeFee: z.string().optional(),
+  accessValue: z.string().optional(),
+  feeRate: z.string().optional(),
+  discount: z.string().optional(),
   valuerId: z.string().optional(),
   inspectorName: z.string().optional(),
   indicationDate: z.string().optional(),
@@ -131,15 +139,7 @@ type ConfirmDialogState = {
   description: string;
   onConfirm: () => void;
 };
-type ComponentDraft = {
-  localId: string;
-  id?: number;
-  componentType: "LAND" | "BUILDING" | "OTHER";
-  description: string;
-  area: string;
-  minRate: string;
-  maxRate: string;
-};
+type ComponentDraft = IndicativeComponentDraftValue;
 type NewPropertyDraft = {
   propertyTypeId: string;
   propertySubtypeId: string;
@@ -162,20 +162,11 @@ type PropertyPhotoField = "frontSide" | "inside";
 type PropertyPhotoFiles = Record<PropertyPhotoField, File | null>;
 type PropertyPhotoPreviews = Record<PropertyPhotoField, string>;
 
-const toNumber = (value?: string) => {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : 0;
-};
-
-const parseOptionalNumber = (value?: string) => {
-  if (!value || !value.trim()) return undefined;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : undefined;
-};
-
-const parseNullableNumber = (value?: string) => {
-  if (!value || !value.trim()) return null;
-  const numeric = Number(value);
+const parseOptionalNumber = (value?: string | number) => {
+  if (value === undefined || value === null) return undefined;
+  const normalized = typeof value === "string" ? value.trim() : String(value);
+  if (!normalized) return undefined;
+  const numeric = Number(normalized);
   return Number.isFinite(numeric) ? numeric : undefined;
 };
 
@@ -298,18 +289,6 @@ const getPolygonCenter = (
   return { latitude: latSum / count, longitude: lngSum / count };
 };
 
-const formatMoney = (value: number, currency = "USD") => {
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 0,
-    }).format(value);
-  } catch {
-    return `$${value.toLocaleString()}`;
-  }
-};
-
 const toIndicativeFormData = (
   input: Record<string, unknown>,
   files: PropertyPhotoFiles,
@@ -336,18 +315,6 @@ const toIndicativeFormData = (
 
   return formData;
 };
-
-const createComponentDraft = (
-  componentType: "LAND" | "BUILDING" | "OTHER" = "LAND",
-): ComponentDraft => ({
-  localId: `${componentType}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  componentType,
-  description:
-    componentType === "LAND" ? "Land" : componentType === "BUILDING" ? "Building" : "Other",
-  area: "",
-  minRate: "",
-  maxRate: "",
-});
 
 const defaultNewPropertyDraft = (): NewPropertyDraft => ({
   propertyTypeId: "",
@@ -429,7 +396,9 @@ export default function AddPropertyIndicativeValuationPage() {
       instructedBy: "",
       contactName: "",
       contactTel: "",
-      chargeFee: "",
+      accessValue: "",
+      feeRate: "",
+      discount: "",
       valuerId: user?.id ? String(user.id) : "",
       inspectorName: "",
       indicationDate: new Date().toISOString().slice(0, 10),
@@ -449,7 +418,10 @@ export default function AddPropertyIndicativeValuationPage() {
   const valuers = userListResult?.users ?? [];
   const valuerIdValue = form.watch("valuerId");
   const currency = form.watch("currency") || "USD";
-  const forcedSalePercentValue = toNumber(form.watch("forcedSalePercent"));
+  const accessValueInput = form.watch("accessValue");
+  const feeRateInput = form.watch("feeRate");
+  const discountInput = form.watch("discount");
+  const forcedSalePercentInput = form.watch("forcedSalePercent");
 
   const selectedValuer = valuers.find(
     (valuer) => String(valuer.id) === valuerIdValue,
@@ -520,30 +492,29 @@ export default function AddPropertyIndicativeValuationPage() {
     [t],
   );
 
-  const componentRows = useMemo(
+  const {
+    componentRows,
+    totalMinMarketValue,
+    totalMaxMarketValue,
+    automaticAccessValue,
+    feeRateValue,
+    discountValue,
+    forcedSalePercentValue,
+    maxChargeFeeValue,
+    forcedSaleValue,
+    accessValueRangeLabel,
+    chargeFeeRangeLabel,
+  } = useMemo(
     () =>
-      components.map((component) => {
-        const area = toNumber(component.area);
-        const minRate = toNumber(component.minRate);
-        const maxRate = toNumber(component.maxRate);
-        const minValue = area * minRate;
-        const maxValue = area * maxRate;
-        return { ...component, areaValue: area, minRateValue: minRate, maxRateValue: maxRate, minValue, maxValue };
+      calculateIndicativeMetrics({
+        components,
+        accessValueInput,
+        feeRateInput,
+        discountInput,
+        forcedSalePercentInput,
+        currency,
       }),
-    [components],
-  );
-
-  const totalMinMarketValue = useMemo(
-    () => componentRows.reduce((sum, component) => sum + component.minValue, 0),
-    [componentRows],
-  );
-  const totalMaxMarketValue = useMemo(
-    () => componentRows.reduce((sum, component) => sum + component.maxValue, 0),
-    [componentRows],
-  );
-  const forcedSaleValue = useMemo(
-    () => totalMaxMarketValue * (forcedSalePercentValue / 100),
-    [forcedSalePercentValue, totalMaxMarketValue],
+    [accessValueInput, components, currency, discountInput, feeRateInput, forcedSalePercentInput],
   );
 
   const stepItems = useMemo(
@@ -1209,8 +1180,9 @@ export default function AddPropertyIndicativeValuationPage() {
         if (tab === "introduction") {
           form.reset({
             ...values,
+            status: "ACTIVE",
+            workflowStatus: "DRAFT",
             instructedBy: "",
-            chargeFee: "",
             indicationDate: new Date().toISOString().slice(0, 10),
             instructionDate: "",
             intendedUse: "",
@@ -1232,11 +1204,11 @@ export default function AddPropertyIndicativeValuationPage() {
         if (tab === "valuation") {
           form.reset({
             ...values,
-            currency: "USD",
-            status: "ACTIVE",
-            workflowStatus: "DRAFT",
             contactName: "",
             contactTel: "",
+            accessValue: "",
+            feeRate: "",
+            discount: "",
             valuerId: defaultValuerId,
             inspectorName: "",
             forcedSalePercent: "",
@@ -1316,7 +1288,7 @@ export default function AddPropertyIndicativeValuationPage() {
     }
 
     const payload = {
-      currency: values.currency,
+      currency: "USD",
       ...(canSelectStatus
         ? {
             status: values.status,
@@ -1326,7 +1298,10 @@ export default function AddPropertyIndicativeValuationPage() {
       instructedBy: normalizeOptionalText(values.instructedBy),
       contactName: normalizeOptionalText(values.contactName),
       contactTel: normalizeOptionalText(values.contactTel),
-      chargeFee: parseNullableNumber(values.chargeFee),
+      accessValue: parseNullableNumber(values.accessValue),
+      feeRate: parseNullableNumber(values.feeRate),
+      discount: parseNullableNumber(values.discount),
+      chargeFee: maxChargeFeeValue > 0 ? maxChargeFeeValue : null,
       valuerId: Number(values.valuerId || user?.id || 0) || undefined,
       inspectorName: normalizeOptionalText(values.inspectorName),
       indicationDate: normalizeOptionalText(values.indicationDate),
@@ -1370,8 +1345,9 @@ export default function AddPropertyIndicativeValuationPage() {
       ) {
         setActiveTab("property");
       } else if (
+        description.includes("workflowStatus") ||
+        description.includes("status") ||
         description.includes("instructedBy") ||
-        description.includes("chargeFee") ||
         description.includes("instructionDate") ||
         description.includes("indicationDate") ||
         description.includes("intendedUse") ||
@@ -1379,9 +1355,11 @@ export default function AddPropertyIndicativeValuationPage() {
       ) {
         setActiveTab("introduction");
       } else if (
-        description.includes("currency") ||
         description.includes("contactName") ||
         description.includes("contactTel") ||
+        description.includes("accessValue") ||
+        description.includes("feeRate") ||
+        description.includes("discount") ||
         description.includes("valuerId") ||
         description.includes("componentType") ||
         description.includes("description") ||
@@ -1500,7 +1478,7 @@ export default function AddPropertyIndicativeValuationPage() {
                     <CardContent className="space-y-6">
                      
 
-                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         <FormField
                           control={form.control}
                           name="instructedBy"
@@ -1563,21 +1541,66 @@ export default function AddPropertyIndicativeValuationPage() {
                         />
                         <FormField
                           control={form.control}
-                          name="chargeFee"
+                          name="workflowStatus"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>{t("fields.chargeFee")}</FormLabel>
-                              <FormControl>
-                                <Input
-                                  {...field}
-                                  className="h-11"
-                                  type="number"
-                                  step="0.01"
-                                  min="0"
-                                  disabled={createMutation.isPending}
-                                  placeholder={t("fields.chargeFeePlaceholder")}
-                                />
-                              </FormControl>
+                              <FormLabel>{t("fields.workflowStatus")}</FormLabel>
+                              <Select
+                                value={field.value ?? "DRAFT"}
+                                onValueChange={field.onChange}
+                                disabled={!canSelectStatus || createMutation.isPending}
+                              >
+                                <FormControl>
+                                  <SelectTrigger className={`h-11 ${!canSelectStatus ? "bg-muted/50" : "bg-background"}`}>
+                                    <SelectValue placeholder={t("fields.workflowStatusPlaceholder")} />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  {workflowStatusOptions.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {!canSelectStatus ? (
+                                <FormDescription className="text-xs text-muted-foreground">
+                                  Workflow status is locked to `Draft` for valuers.
+                                </FormDescription>
+                              ) : null}
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="status"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t("fields.indicativeValuationStatus")}</FormLabel>
+                              <Select
+                                value={field.value ?? "ACTIVE"}
+                                onValueChange={field.onChange}
+                                disabled={!canSelectStatus || createMutation.isPending}
+                              >
+                                <FormControl>
+                                  <SelectTrigger className={`h-11 ${!canSelectStatus ? "bg-muted/50" : "bg-background"}`}>
+                                    <SelectValue placeholder={t("fields.indicativeValuationStatusPlaceholder")} />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  {businessStatusOptions.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {!canSelectStatus ? (
+                                <FormDescription className="text-xs text-muted-foreground">
+                                  Business status is locked to `Active` for valuers.
+                                </FormDescription>
+                              ) : null}
                               <FormMessage />
                             </FormItem>
                           )}
@@ -1859,101 +1882,7 @@ export default function AddPropertyIndicativeValuationPage() {
                       </div>
                     </CardHeader>
 
-                    <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <FormField
-                        control={form.control}
-                        name="currency"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{t("fields.currency")}</FormLabel>
-                            <Select
-                              onValueChange={field.onChange}
-                              value={field.value}
-                              disabled={createMutation.isPending}
-                            >
-                              <FormControl>
-                                <SelectTrigger className="h-11">
-                                  <SelectValue placeholder="USD" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                <SelectItem value="USD">USD</SelectItem>
-                                <SelectItem value="KHR">KHR</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={form.control}
-                        name="workflowStatus"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{t("fields.workflowStatus")}</FormLabel>
-                            <Select
-                              value={field.value ?? "DRAFT"}
-                              onValueChange={field.onChange}
-                              disabled={!canSelectStatus || createMutation.isPending}
-                            >
-                              <FormControl>
-                                <SelectTrigger className={`h-11 ${!canSelectStatus ? "bg-muted/50" : "bg-background"}`}>
-                                  <SelectValue placeholder={t("fields.workflowStatusPlaceholder")} />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {workflowStatusOptions.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
-                                    {option.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            {!canSelectStatus ? (
-                              <FormDescription className="text-xs text-muted-foreground">
-                                Workflow status is locked to `Draft` for valuers.
-                              </FormDescription>
-                            ) : null}
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={form.control}
-                        name="status"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{t("fields.indicativeValuationStatus")}</FormLabel>
-                            <Select
-                              value={field.value ?? "ACTIVE"}
-                              onValueChange={field.onChange}
-                              disabled={!canSelectStatus || createMutation.isPending}
-                            >
-                              <FormControl>
-                                <SelectTrigger className={`h-11 ${!canSelectStatus ? "bg-muted/50" : "bg-background"}`}>
-                                  <SelectValue placeholder={t("fields.indicativeValuationStatusPlaceholder")} />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {businessStatusOptions.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
-                                    {option.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            {!canSelectStatus ? (
-                              <FormDescription className="text-xs text-muted-foreground">
-                                Business status is locked to `Active` for valuers.
-                              </FormDescription>
-                            ) : null}
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
+                    <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                       <FormField
                         control={form.control}
                         name="valuerId"
@@ -2048,34 +1977,11 @@ export default function AddPropertyIndicativeValuationPage() {
                         )}
                       />
 
-                      <FormField
-                        control={form.control}
-                        name="forcedSalePercent"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{t("fields.forcedSalePercent")}</FormLabel>
-                            <FormControl>
-                              <Input
-                                {...field}
-                                className="h-11"
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                max="100"
-                                disabled={createMutation.isPending}
-                                placeholder="0"
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
                        <FormField
                           control={form.control}
                           name="note"
                           render={({ field }) => (
-                            <FormItem className="md:col-span-2 xl:col-span-3">
+                            <FormItem className="md:col-span-2 xl:col-span-4">
                               <FormLabel>{renderRequiredLabel(t("fields.note"))}</FormLabel>
                               <FormControl>
                                 <Textarea
@@ -2095,7 +2001,7 @@ export default function AddPropertyIndicativeValuationPage() {
                         control={form.control}
                         name="internalNotes"
                         render={({ field }) => (
-                          <FormItem className="md:col-span-2 xl:col-span-3">
+                          <FormItem className="md:col-span-2 xl:col-span-4">
                             <FormLabel>{t("fields.internalNotes")}</FormLabel>
                             <FormControl>
                               <Textarea
@@ -2140,6 +2046,8 @@ export default function AddPropertyIndicativeValuationPage() {
                     </CardHeader>
 
                     <CardContent className="space-y-6">
+                     
+
                       <div className="flex flex-wrap gap-3">
                         <Button type="button" variant="outline" onClick={() => addComponent("LAND")}>
                           <Plus className="mr-2 h-4 w-4" />
@@ -2153,10 +2061,6 @@ export default function AddPropertyIndicativeValuationPage() {
                           <Plus className="mr-2 h-4 w-4" />
                           {t("actions.addOther")}
                         </Button>
-                      </div>
-
-                      <div className="rounded-2xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
-                        {t("summary.areaUnit")}
                       </div>
 
                       <div className="space-y-4">
@@ -2278,70 +2182,21 @@ export default function AddPropertyIndicativeValuationPage() {
                         ))}
                       </div>
 
-                      <Separator />
-
-                      <div className="grid gap-4 md:grid-cols-4">
-                        <Card className="border-primary/10 bg-primary/5">
-                          <CardHeader className="pb-3">
-                            <CardTitle className="flex items-center gap-2 text-base">
-                              <DollarSign className="h-4 w-4 text-primary" />
-                              {t("summary.totalMin")}
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            <div className="text-2xl font-semibold">
-                              {formatMoney(totalMinMarketValue, currency)}
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        <Card className="border-primary/10 bg-primary/5">
-                          <CardHeader className="pb-3">
-                            <CardTitle className="flex items-center gap-2 text-base">
-                              <DollarSign className="h-4 w-4 text-primary" />
-                              {t("summary.totalMax")}
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            <div className="text-2xl font-semibold">
-                              {formatMoney(totalMaxMarketValue, currency)}
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        <Card className="border-primary/10 bg-primary/5">
-                          <CardHeader className="pb-3">
-                            <CardTitle className="flex items-center gap-2 text-base">
-                              <DollarSign className="h-4 w-4 text-primary" />
-                              {t("summary.totalRange")}
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            <div className="text-lg font-semibold">
-                              {`${formatMoney(totalMinMarketValue, currency)} - ${formatMoney(totalMaxMarketValue, currency)}`}
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        <Card className="border-primary/10 bg-primary/5">
-                          <CardHeader className="pb-3">
-                            <CardTitle className="flex items-center gap-2 text-base">
-                              <DollarSign className="h-4 w-4 text-primary" />
-                              {t("fields.forcedSaleValue")}
-                            </CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            <div className="text-sm text-muted-foreground">
-                              {t("summary.forcedSalePercentOfTotalMax", {
-                                percent: forcedSalePercentValue.toFixed(2),
-                              })}
-                            </div>
-                            <div className="mt-2 text-lg font-semibold">
-                              {formatMoney(forcedSaleValue, currency)}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </div>
+                      <IndicativeValuationFinancialPanel
+                        control={form.control}
+                        disabled={createMutation.isPending}
+                        currency={currency}
+                        totalMinMarketValue={totalMinMarketValue}
+                        totalMaxMarketValue={totalMaxMarketValue}
+                        accessValueRangeLabel={accessValueRangeLabel}
+                        chargeFeeRangeLabel={chargeFeeRangeLabel}
+                        forcedSaleValue={forcedSaleValue}
+                        feeRateValue={feeRateValue}
+                        discountValue={discountValue}
+                        forcedSalePercentValue={forcedSalePercentValue}
+                        automaticAccessValue={automaticAccessValue}
+                        t={t}
+                      />
                     </CardContent>
                   </Card>
                 </TabsContent>

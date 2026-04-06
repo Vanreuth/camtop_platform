@@ -1,8 +1,13 @@
 import ExcelJS from "exceljs";
-import { Prisma } from "@prisma/client";
-import { prisma } from "../../db/prisma";
 import { NotFoundError } from "../../common/errors/notFound.error";
 import type { IndicativeValuationFiltersDTO } from "./indicativeValuation.dto";
+import {
+  computeChargeFeeRangeNumber,
+  normalizeFeePercent,
+  resolveFeeAccessValueRangeNumber,
+  sumComponentValueRangeNumber,
+} from "./indicativeValuation.calculation";
+import { IndicativeValuationRepository } from "./indicativeValuation.repository";
 
 const COLORS = {
   brand: "FF981B1E",
@@ -30,36 +35,7 @@ const COMPANY_FOOTER = {
   website: "www.camtopproperty.com",
 };
 
-const sortFieldMap: Record<string, string> = {
-  id: "indicationId",
-  valuationId: "indicationId",
-  valuationNo: "indicationNo",
-  indicationNo: "indicationNo",
-  valuationDate: "indicationDate",
-  indicationDate: "indicationDate",
-  dateOfInspection: "instructionDate",
-  instructionDate: "instructionDate",
-  preparedFor: "instructedBy",
-  instructedBy: "instructedBy",
-  minMarketValue: "minValue",
-  maxMarketValue: "maxValue",
-};
-
-const fallbackSortFields = new Set([
-  "indicationId",
-  "propertyId",
-  "currency",
-  "status",
-  "workflowStatus",
-  "valuerId",
-  "createdAt",
-  "updatedAt",
-  "indicationNo",
-  "indicationDate",
-  "instructionDate",
-  "minValue",
-  "maxValue",
-]);
+const repository = new IndicativeValuationRepository();
 
 const formatDate = (value?: Date | null) => {
   if (!value) return "-";
@@ -81,6 +57,23 @@ const formatPercent = (value?: number | string | null) => {
   const numeric = typeof value === "string" ? Number(value) : value;
   if (!Number.isFinite(numeric)) return "-";
   return Number.isInteger(numeric) ? `${numeric}%` : `${formatNumber(numeric, 2)}%`;
+};
+
+const formatCurrencyRange = (
+  minValue?: number | string | null,
+  maxValue?: number | string | null,
+  currency = "USD",
+) => {
+  const minLabel =
+    minValue === null || minValue === undefined ? "-" : `${currency} ${formatNumber(minValue, 2)}`;
+  const maxLabel =
+    maxValue === null || maxValue === undefined ? "-" : `${currency} ${formatNumber(maxValue, 2)}`;
+
+  if (minLabel === "-" && maxLabel === "-") return "-";
+  if (minLabel === maxLabel) return minLabel;
+  if (minLabel === "-") return maxLabel;
+  if (maxLabel === "-") return minLabel;
+  return `${minLabel} - ${maxLabel}`;
 };
 
 const getCurrencyFormat = (currency?: string | null) => {
@@ -310,122 +303,7 @@ const addPhotoBlock = async (
 export const exportIndicativeValuationsToExcel = async (
   filters: IndicativeValuationFiltersDTO,
 ): Promise<Uint8Array> => {
-  const {
-    sortBy,
-    sortOrder,
-    search,
-    propertyTypeId,
-    provinceId,
-    districtId,
-    communeId,
-    villageId,
-    minMarketValue,
-    maxMarketValue,
-    createdAfter,
-    createdBefore,
-    ...rest
-  } = filters;
-
-  const propertyFilters: Prisma.PropertyWhereInput = {
-    ...(propertyTypeId ? { propertyTypeId } : {}),
-    ...(provinceId || districtId || communeId || villageId
-      ? {
-          propertyAddress: {
-            is: {
-              ...(provinceId ? { provinceId } : {}),
-              ...(districtId ? { districtId } : {}),
-              ...(communeId ? { communeId } : {}),
-              ...(villageId ? { villageId } : {}),
-            },
-          },
-        }
-      : {}),
-  };
-
-  const where: Prisma.PropertyIndicativeValuationWhereInput = {
-    ...(rest.propertyId && { propertyId: rest.propertyId }),
-    ...(rest.valuerId && { valuerId: rest.valuerId }),
-    ...(rest.status && { status: rest.status }),
-    ...(rest.workflowStatus && { workflowStatus: rest.workflowStatus }),
-    ...((rest.instructedBy || rest.preparedFor)
-      ? { instructedBy: rest.instructedBy ?? rest.preparedFor }
-      : {}),
-    ...((rest.intendedUse || rest.purposeOfValuation)
-      ? { intendedUse: rest.intendedUse ?? rest.purposeOfValuation }
-      : {}),
-    ...(Object.keys(propertyFilters).length > 0
-      ? {
-          property: {
-            is: propertyFilters,
-          },
-        }
-      : {}),
-    ...(minMarketValue !== undefined
-      ? {
-          minValue: {
-            gte: minMarketValue,
-          },
-        }
-      : {}),
-    ...(maxMarketValue !== undefined
-      ? {
-          maxValue: {
-            lte: maxMarketValue,
-          },
-        }
-      : {}),
-    ...(createdAfter || createdBefore
-      ? {
-          createdAt: {
-            ...(createdAfter ? { gte: createdAfter } : {}),
-            ...(createdBefore ? { lte: createdBefore } : {}),
-          },
-        }
-      : {}),
-    ...(search
-      ? {
-          OR: [
-            { indicationNo: { contains: search, mode: "insensitive" } },
-            { instructedBy: { contains: search, mode: "insensitive" } },
-            { contactName: { contains: search, mode: "insensitive" } },
-            { contactTel: { contains: search, mode: "insensitive" } },
-            { intendedUse: { contains: search, mode: "insensitive" } },
-            { property: { is: { propertyName: { contains: search, mode: "insensitive" } } } },
-            { property: { is: { propertyCode: { contains: search, mode: "insensitive" } } } },
-          ],
-        }
-      : {}),
-  };
-
-  const normalizedSortBy = sortFieldMap[sortBy] ?? sortBy;
-  const orderByField = fallbackSortFields.has(normalizedSortBy)
-    ? normalizedSortBy
-    : "createdAt";
-
-  const valuations = await prisma.propertyIndicativeValuation.findMany({
-    where,
-    orderBy: {
-      [orderByField]: sortOrder,
-    } as Prisma.PropertyIndicativeValuationOrderByWithRelationInput,
-    include: {
-      property: {
-        include: {
-          propertyType: true,
-          propertyAddress: {
-            include: {
-              province: true,
-              district: true,
-              commune: true,
-              village: true,
-            },
-          },
-        },
-      },
-      valuer: {
-        select: { id: true, username: true, firstName: true, lastName: true },
-      },
-    },
-  });
+  const valuations = await repository.findForExport(filters);
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "CAMTOP Property Group";
@@ -456,6 +334,7 @@ export const exportIndicativeValuationsToExcel = async (
   ];
 
   valuations.forEach((valuation) => {
+    const marketTotals = sumComponentValueRangeNumber(valuation.components);
     const valuerName =
       valuation.valuer?.firstName || valuation.valuer?.lastName
         ? `${valuation.valuer?.firstName ?? ""} ${valuation.valuer?.lastName ?? ""}`.trim()
@@ -468,8 +347,8 @@ export const exportIndicativeValuationsToExcel = async (
       intendedUse: valuation.intendedUse ?? "",
       instructionDate: formatDate(valuation.instructionDate),
       indicationDate: formatDate(valuation.indicationDate),
-      minValue: Number(valuation.minValue ?? 0),
-      maxValue: Number(valuation.maxValue ?? 0),
+      minValue: marketTotals.min ?? 0,
+      maxValue: marketTotals.max ?? 0,
       forcedSaleValue: Number(valuation.forcedSaleValue ?? 0),
       currency: valuation.currency ?? "",
       valuerName,
@@ -512,33 +391,7 @@ export const exportIndicativeValuationsToExcel = async (
 export const exportIndicativeValuationToExcel = async (
   indicationId: number,
 ): Promise<Uint8Array> => {
-  const indication = await prisma.propertyIndicativeValuation.findUnique({
-    where: { indicationId },
-    include: {
-      property: {
-        include: {
-          propertyType: true,
-          dataSource: true,
-          propertyAddress: {
-            include: {
-              province: true,
-              district: true,
-              commune: true,
-              village: true,
-            },
-          },
-          propertyLocation: true,
-          propertyPhotos: true,
-        },
-      },
-      valuer: {
-        select: { firstName: true, lastName: true, username: true },
-      },
-      components: {
-        orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
-      },
-    },
-  });
+  const indication = await repository.findWithComponents(indicationId);
 
   if (!indication || !indication.components.length) {
     throw new NotFoundError(`Indicative valuation ${indicationId} not found`);
@@ -592,14 +445,31 @@ export const exportIndicativeValuationToExcel = async (
     indicationRecord.contactTel ?? property?.dataSource?.phoneNumber ?? "-";
   const forcedSalePercent =
     indication.forcedSalePercent != null ? Number(indication.forcedSalePercent) : 0;
-  const totalMin = Number(indication.minValue ?? 0);
-  const totalMax = Number(indication.maxValue ?? 0);
+  const marketTotals = sumComponentValueRangeNumber(indication.components);
+  const totalMin = marketTotals.min ?? 0;
+  const totalMax = marketTotals.max ?? 0;
   const forcedSaleValue =
     indication.forcedSaleValue != null
       ? Number(indication.forcedSaleValue)
       : totalMax * (forcedSalePercent / 100);
-  const chargeFee =
-    indicationRecord.chargeFee != null ? Number(indicationRecord.chargeFee) : null;
+  const accessValueRange = resolveFeeAccessValueRangeNumber({
+    accessValue: indicationRecord.accessValue,
+    fallbackMinAccessValue: totalMin,
+    fallbackMaxAccessValue: totalMax,
+    treatMaxMatchAsAuto: true,
+  });
+  const feeRate =
+    indicationRecord.feeRate != null ? normalizeFeePercent(indicationRecord.feeRate) : null;
+  const discount =
+    indicationRecord.discount != null ? normalizeFeePercent(indicationRecord.discount) : null;
+  const chargeFeeRange = computeChargeFeeRangeNumber({
+    accessValue: indicationRecord.accessValue,
+    fallbackMinAccessValue: totalMin,
+    fallbackMaxAccessValue: totalMax,
+    feeRate: indicationRecord.feeRate,
+    discount: indicationRecord.discount,
+    treatMaxMatchAsAuto: true,
+  });
   const currencyFormat = getCurrencyFormat(indication.currency);
 
   worksheet.columns = [
@@ -724,12 +594,28 @@ export const exportIndicativeValuationToExcel = async (
     11,
     "Valuer",
     valuerName,
-    "Charge Fee",
-    chargeFee != null ? `${indication.currency ?? "USD"} ${formatNumber(chargeFee, 2)}` : "-",
+    "Access Value",
+    formatCurrencyRange(accessValueRange.min, accessValueRange.max, indication.currency ?? "USD"),
   );
   addLabelValueRow(
     worksheet,
     12,
+    "Fee Rate",
+    formatPercent(feeRate),
+    "Discount",
+    formatPercent(discount),
+  );
+  addLabelValueRow(
+    worksheet,
+    13,
+    "Fee Charge",
+    formatCurrencyRange(chargeFeeRange.min, chargeFeeRange.max, indication.currency ?? "USD"),
+    "Currency",
+    indication.currency ?? "USD",
+  );
+  addLabelValueRow(
+    worksheet,
+    14,
     "Intended Use",
     indication.intendedUse ?? "-",
     "Coordinates",
@@ -740,17 +626,15 @@ export const exportIndicativeValuationToExcel = async (
   );
   addLabelValueRow(
     worksheet,
-    13,
+    15,
     "Property Type",
     property?.propertyType?.propertyName ?? "-",
-    "Currency",
-    indication.currency ?? "USD",
   );
-  addLabelValueRow(worksheet, 14, "Property Address", addressLine || "-");
+  addLabelValueRow(worksheet, 16, "Property Address", addressLine || "-");
 
-  worksheet.mergeCells("A16:H16");
-  worksheet.getCell("A16").value = "PROPERTY PHOTOS";
-  styleMergedRange(worksheet, "A16:H16", {
+  worksheet.mergeCells("A18:H18");
+  worksheet.getCell("A18").value = "PROPERTY PHOTOS";
+  styleMergedRange(worksheet, "A18:H18", {
     bold: true,
     color: COLORS.white,
     fill: COLORS.navy,
@@ -762,18 +646,18 @@ export const exportIndicativeValuationToExcel = async (
     title: "Front Side",
     imageUrl: propertyPhotos?.frontSide,
     startColumn: "A",
-    startRow: 17,
+    startRow: 19,
   });
   await addPhotoBlock(workbook, worksheet, {
     title: "Inside View",
     imageUrl: propertyPhotos?.inside,
     startColumn: "E",
-    startRow: 17,
+    startRow: 19,
   });
 
-  worksheet.mergeCells("A27:H27");
-  worksheet.getCell("A27").value = "INDICATED VALUE BREAKDOWN";
-  styleMergedRange(worksheet, "A27:H27", {
+  worksheet.mergeCells("A29:H29");
+  worksheet.getCell("A29").value = "INDICATED VALUE BREAKDOWN";
+  styleMergedRange(worksheet, "A29:H29", {
     bold: true,
     color: COLORS.white,
     fill: COLORS.navy,
@@ -781,7 +665,7 @@ export const exportIndicativeValuationToExcel = async (
     size: 11,
   });
 
-  const tableHeaderRow = 28;
+  const tableHeaderRow = 30;
   const headerValues = [
     "No.",
     "Description",

@@ -49,7 +49,14 @@ export type IndicativeValuation = {
   instructedBy?: string | null;
   contactName?: string | null;
   contactTel?: string | null;
+  accessValue?: number | null;
+  minAccessValue?: number | null;
+  maxAccessValue?: number | null;
+  feeRate?: number | null;
+  discount?: number | null;
   chargeFee?: number | null;
+  minChargeFee?: number | null;
+  maxChargeFee?: number | null;
   dateOfReport?: string | null;
   expiryDate?: string | null;
   preparedFor?: string | null;
@@ -107,6 +114,9 @@ export type CreateIndicativeValuationInput = {
   preparedFor?: string;
   contactName?: string;
   contactTel?: string;
+  accessValue?: number | null;
+  feeRate?: number | null;
+  discount?: number | null;
   chargeFee?: number | null;
   valuerId?: number;
   inspectorName?: string;
@@ -140,6 +150,9 @@ export type UpdateIndicativeValuationInput = {
   preparedFor?: string;
   contactName?: string;
   contactTel?: string;
+  accessValue?: number | null;
+  feeRate?: number | null;
+  discount?: number | null;
   chargeFee?: number | null;
   valuerId?: number;
   inspectorName?: string;

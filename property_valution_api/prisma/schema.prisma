@@ -992,10 +992,6 @@ model PropertyIndicativeValuation {
   instructedBy    String?   @map("instructed_by")  @db.VarChar(255)
   intendedUse     String?   @map("intended_use")   @db.VarChar(255)
 
-  // Always = SUM of component min/maxValue
-  // Updated in service layer on every component change
-  minValue  Decimal @map("min_value") @db.Decimal(18, 2)
-  maxValue  Decimal @map("max_value") @db.Decimal(18, 2)
   forcedSalePercent Decimal? @map("forced_sale_percent") @db.Decimal(5, 2)
   forcedSaleValue Decimal? @map("forced_sale_value") @db.Decimal(18, 2)
   currency  String  @default("USD")   @db.VarChar(3)
@@ -1003,7 +999,14 @@ model PropertyIndicativeValuation {
   // ── Contact ──────────────────────────────────
   contactName  String? @map("contact_name") @db.VarChar(255)
   contactTel   String? @map("contact_tel") @db.VarChar(50)
+  accessValue  Decimal? @map("access_value") @db.Decimal(18, 2)
+  minAccessValue Decimal? @map("min_access_value") @db.Decimal(18, 2)
+  maxAccessValue Decimal? @map("max_access_value") @db.Decimal(18, 2)
+  feeRate      Decimal? @map("fee_rate") @db.Decimal(7, 4)
+  discount     Decimal? @map("discount") @db.Decimal(7, 4)
   chargeFee    Decimal? @map("charge_fee") @db.Decimal(18, 2)
+  minChargeFee Decimal? @map("min_charge_fee") @db.Decimal(18, 2)
+  maxChargeFee Decimal? @map("max_charge_fee") @db.Decimal(18, 2)
 
   // ── Assignment ───────────────────────────────
   valuerId      Int?    @map("valuer_id")

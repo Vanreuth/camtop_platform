@@ -1732,7 +1732,15 @@
       "contactNamePlaceholder": "Enter contact name",
       "contactTel": "Contact Tel",
       "contactTelPlaceholder": "Enter contact telephone",
+      "accessValue": "Access Value",
+      "accessValueRange": "Access Value Range",
+      "accessValuePlaceholder": "Enter access value",
+      "feeRate": "Fee Rate %",
+      "feeRatePlaceholder": "Enter fee rate",
+      "discount": "Discount %",
+      "discountPlaceholder": "Enter discount",
       "chargeFee": "Charge Fee",
+      "chargeFeeRange": "Charge Fee Range",
       "chargeFeePlaceholder": "Enter charge fee",
       "valuer": "Valuer",
       "valuerPlaceholder": "Select valuer",
@@ -1790,8 +1798,8 @@
       "timelineDescription": "Track created dates and narrative notes.",
       "photos": "Property Photos",
       "photosDescription": "Reference images attached to the indicative property record.",
-      "components": "Indicative Components",
-      "componentsDescription": "Each component contributes to the total indicative valuation range."
+      "components": "Indication",
+      "componentsDescription": "Set access value, fee terms, forced sale %, and the indication items that build the total market value range."
     },
     "tabs": {
       "overview": "Overview",
@@ -1812,7 +1820,12 @@
       "selectedProperty": "Selected Property",
       "assignedValuer": "Assigned Valuer",
       "range": "Indicative Range",
+      "autoRange": "Auto Range",
+      "manualRange": "Manual Range",
       "forcedSalePercentOfTotalMax": "{percent}% of total max value",
+      "accessValueDefaultsToTotalMax": "Leaves blank use the total min-max value range automatically.",
+      "manualAccessValueLocksRange": "Entered access value will lock both minimum and maximum to one fixed amount.",
+      "feeChargeFormula": "Rate {rate}% with discount {discount}%",
       "totalRange": "Total Market Value Range",
       "totalMin": "Total Minimum Value",
       "totalMax": "Total Maximum Value",
@@ -1844,10 +1857,10 @@
       "reassign": "Reassign"
     },
     "component": {
-      "primary": "Primary Component",
-      "additional": "Component",
-      "primaryDescription": "This first component anchors the indicative valuation workflow.",
-      "additionalDescription": "{type} contribution to the total market value range."
+      "primary": "Primary Indication",
+      "additional": "Indication",
+      "primaryDescription": "This first indication starts the value breakdown.",
+      "additionalDescription": "{type} indication included in the total market value range."
     },
     "dialogs": {
       "submitTitle": "Submit indicative valuation",

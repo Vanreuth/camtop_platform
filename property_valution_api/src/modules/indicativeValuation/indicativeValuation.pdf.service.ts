@@ -1,4 +1,10 @@
 import type { IndicativeValuationWithRelations } from "./indicativeValuation.repository";
+import {
+  computeChargeFeeRangeNumber,
+  normalizeFeePercent,
+  resolveFeeAccessValueRangeNumber,
+  sumComponentValueRangeNumber,
+} from "./indicativeValuation.calculation";
 
 const PDFDocument = require("pdfkit");
 
@@ -99,6 +105,21 @@ const formatCurrencyValue = (value?: number | string | null, currency = "USD") =
   const formattedNumber = formatNumber(value, 2);
   if (formattedNumber === "-") return "-";
   return `${currency} ${formattedNumber}`;
+};
+
+const formatCurrencyRange = (
+  minValue?: number | string | null,
+  maxValue?: number | string | null,
+  currency = "USD",
+) => {
+  const minLabel = formatCurrencyValue(minValue, currency);
+  const maxLabel = formatCurrencyValue(maxValue, currency);
+
+  if (minLabel === "-" && maxLabel === "-") return "-";
+  if (minLabel === maxLabel) return minLabel;
+  if (minLabel === "-") return maxLabel;
+  if (maxLabel === "-") return minLabel;
+  return `${minLabel} - ${maxLabel}`;
 };
 
 const truncateText = (value?: string | null, maxLength = 180) => {
@@ -504,14 +525,33 @@ export const createIndicativeValuationPdf = async (
   const coordinatesLabel = getCoordinatesLabel(indication);
   const contactDetailLabel = getContactDetailLabel(indication);
   const fileName = buildPdfFileName(indication.indicationNo, version);
-  const totalMin = Number(indication.minValue ?? 0);
-  const totalMax = Number(indication.maxValue ?? 0);
+  const marketTotals = sumComponentValueRangeNumber(indication.components);
+  const totalMin = marketTotals.min ?? 0;
+  const totalMax = marketTotals.max ?? 0;
   const forcedSalePercent =
     indication.forcedSalePercent != null ? Number(indication.forcedSalePercent) : 0;
   const forcedSaleMaxValue =
     indication.forcedSaleValue != null
       ? Number(indication.forcedSaleValue)
       : totalMax * (forcedSalePercent / 100);
+  const accessValueRange = resolveFeeAccessValueRangeNumber({
+    accessValue: (indication as any).accessValue,
+    fallbackMinAccessValue: totalMin,
+    fallbackMaxAccessValue: totalMax,
+    treatMaxMatchAsAuto: true,
+  });
+  const feeRate =
+    (indication as any).feeRate != null ? normalizeFeePercent((indication as any).feeRate) : null;
+  const discount =
+    (indication as any).discount != null ? normalizeFeePercent((indication as any).discount) : null;
+  const chargeFeeRange = computeChargeFeeRangeNumber({
+    accessValue: (indication as any).accessValue,
+    fallbackMinAccessValue: totalMin,
+    fallbackMaxAccessValue: totalMax,
+    feeRate: (indication as any).feeRate,
+    discount: (indication as any).discount,
+    treatMaxMatchAsAuto: true,
+  });
   const referenceNo = indication.indicationNo || "-";
   const financerLabel = indication.instructedBy ?? "-";
   const purposeLabel = indication.intendedUse ?? "-";
@@ -549,6 +589,10 @@ export const createIndicativeValuationPdf = async (
     ["Reference", referenceNo],
     ["Instructed By", financerLabel],
     ["Contact Detail", contactDetailLabel],
+    ["Access Value", formatCurrencyRange(accessValueRange.min, accessValueRange.max, indication.currency ?? "USD")],
+    ["Fee Rate", formatPercent(feeRate)],
+    ["Discount", formatPercent(discount)],
+    ["Fee Charge", formatCurrencyRange(chargeFeeRange.min, chargeFeeRange.max, indication.currency ?? "USD")],
     ["Purpose of Valuation", purposeLabel],
     ["Instructed Date", formatDate(indication.instructionDate)],
     ["Indicated Value Date", formatDate(indication.indicationDate)],
@@ -615,7 +659,7 @@ export const createIndicativeValuationPdf = async (
   });
 
   let currentY = tableY + rowHeight;
-  indication.components.forEach((component, index) => {
+  indication.components.forEach((component: any, index: number) => {
     const rowValues = [
       component.description ?? component.componentType,
       formatNumber(Number(component.area), 2),

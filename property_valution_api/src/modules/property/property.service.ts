@@ -2198,14 +2198,18 @@ export class PropertyService {
           select: {
             indicationId: true,
             indicationNo: true,
-            minValue: true,
-            maxValue: true,
             forcedSaleValue: true,
             indicationDate: true,
             status: true,
             workflowStatus: true,
             instructedBy: true,
             intendedUse: true,
+            components: {
+              select: {
+                minValue: true,
+                maxValue: true,
+              },
+            },
           },
           orderBy: [
             { indicationDate: "desc" as const },
@@ -2298,17 +2302,29 @@ export class PropertyService {
             purposeOfValuation: v.purposeOfValuation ?? null,
           })),
           indicativeValuation: property.propertyIndicativeValuations?.map((v) => ({
-            valuationId: v.indicationId,
-            indicationNo: String(v.indicationNo),
-            valuationNo: String(v.indicationNo),
-            minMarketValue: v.minValue != null ? Number(v.minValue) : null,
-            maxMarketValue: v.maxValue != null ? Number(v.maxValue) : null,
-            forcedSaleValue: v.forcedSaleValue != null ? Number(v.forcedSaleValue) : null,
-            indicationDate: v.indicationDate ?? null,
-            status: v.status ?? null,
-            workflowStatus: v.workflowStatus ?? null,
-            preparedFor: v.instructedBy ?? null,
-            purposeOfValuation: v.intendedUse ?? null,
+            ...(() => {
+              const totals = (v.components ?? []).reduce(
+                (acc, component) => ({
+                  min: acc.min + Number(component.minValue ?? 0),
+                  max: acc.max + Number(component.maxValue ?? 0),
+                }),
+                { min: 0, max: 0 },
+              );
+
+              return {
+                valuationId: v.indicationId,
+                indicationNo: String(v.indicationNo),
+                valuationNo: String(v.indicationNo),
+                minMarketValue: totals.min,
+                maxMarketValue: totals.max,
+                forcedSaleValue: v.forcedSaleValue != null ? Number(v.forcedSaleValue) : null,
+                indicationDate: v.indicationDate ?? null,
+                status: v.status ?? null,
+                workflowStatus: v.workflowStatus ?? null,
+                preparedFor: v.instructedBy ?? null,
+                purposeOfValuation: v.intendedUse ?? null,
+              };
+            })(),
           })),
         };
       });

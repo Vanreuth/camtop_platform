@@ -1770,7 +1770,15 @@
       "contactNamePlaceholder": "បញ្ចូលឈ្មោះទំនាក់ទំនង",
       "contactTel": "លេខទូរស័ព្ទទំនាក់ទំនង",
       "contactTelPlaceholder": "បញ្ចូលលេខទូរស័ព្ទទំនាក់ទំនង",
+      "accessValue": "តម្លៃគិតកម្រៃ",
+      "accessValueRange": "ជួរតម្លៃគិតកម្រៃ",
+      "accessValuePlaceholder": "បញ្ចូលតម្លៃគិតកម្រៃ",
+      "feeRate": "អត្រាកម្រៃ %",
+      "feeRatePlaceholder": "បញ្ចូលអត្រាកម្រៃ",
+      "discount": "បញ្ចុះតម្លៃ %",
+      "discountPlaceholder": "បញ្ចូលបញ្ចុះតម្លៃ",
       "chargeFee": "កម្រៃសេវា",
+      "chargeFeeRange": "ជួរកម្រៃសេវា",
       "chargeFeePlaceholder": "បញ្ចូលកម្រៃសេវា",
       "valuer": "អ្នកវាយតម្លៃ",
       "valuerPlaceholder": "ជ្រើសរើសអ្នកវាយតម្លៃ",
@@ -1828,8 +1836,8 @@
       "timelineDescription": "តាមដានកាលបរិច្ឆេទបង្កើត និងកំណត់ចំណាំពាក់ព័ន្ធ។",
       "photos": "រូបថតអចលនទ្រព្យ",
       "photosDescription": "រូបភាពយោងដែលភ្ជាប់ជាមួយកំណត់ត្រាអចលនទ្រព្យបឋម។",
-      "components": "សមាសភាគវាយតម្លៃបឋម",
-      "componentsDescription": "សមាសភាគនីមួយៗរួមចំណែកទៅកាន់ជួរតម្លៃវាយតម្លៃបឋមសរុប។"
+      "components": "Indication",
+      "componentsDescription": "កំណត់ Access Value, Fee Rate, Discount, Forced Sale % និងធាតុ indication ដែលបង្កើតជាជួរតម្លៃទីផ្សារសរុប។"
     },
     "tabs": {
       "overview": "ទិដ្ឋភាពទូទៅ",
@@ -1850,7 +1858,12 @@
       "selectedProperty": "អចលនទ្រព្យដែលបានជ្រើស",
       "assignedValuer": "អ្នកវាយតម្លៃដែលបានចាត់តាំង",
       "range": "ជួរតម្លៃបឋម",
+      "autoRange": "ជួរស្វ័យប្រវត្តិ",
+      "manualRange": "ជួរដែលកំណត់ដោយដៃ",
       "forcedSalePercentOfTotalMax": "{percent}% នៃតម្លៃអតិបរមាសរុប",
+      "accessValueDefaultsToTotalMax": "បើទុកទទេ នឹងប្រើជួរតម្លៃអប្បបរមា-អតិបរមាសរុបដោយស្វ័យប្រវត្តិ។",
+      "manualAccessValueLocksRange": "បើបញ្ចូល Access Value នោះតម្លៃអប្បបរមា និងអតិបរមានឹងត្រូវកំណត់ជាចំនួនតែមួយ។",
+      "feeChargeFormula": "អត្រា {rate}% និងបញ្ចុះតម្លៃ {discount}%",
       "totalRange": "ជួរតម្លៃទីផ្សារសរុប",
       "totalMin": "តម្លៃអប្បបរមាសរុប",
       "totalMax": "តម្លៃអតិបរមាសរុប",
@@ -1882,10 +1895,10 @@
       "reassign": "ប្ដូរអ្នកទទួលខុសត្រូវ"
     },
     "component": {
-      "primary": "សមាសភាគចម្បង",
-      "additional": "សមាសភាគ",
-      "primaryDescription": "សមាសភាគដំបូងនេះជាមូលដ្ឋានសម្រាប់លំហូរការងារវាយតម្លៃបឋម។",
-      "additionalDescription": "ការចូលរួមរបស់ {type} ទៅក្នុងជួរតម្លៃទីផ្សារសរុប។"
+      "primary": "Primary Indication",
+      "additional": "Indication",
+      "primaryDescription": "Indication ដំបូងនេះចាប់ផ្តើមការបំបែកតម្លៃ។",
+      "additionalDescription": "{type} indication ដែលរួមបញ្ចូលក្នុងជួរតម្លៃទីផ្សារសរុប។"
     },
     "dialogs": {
       "submitTitle": "ដាក់ស្នើការវាយតម្លៃបឋម",

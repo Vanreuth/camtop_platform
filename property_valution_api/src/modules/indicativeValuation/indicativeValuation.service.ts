@@ -40,6 +40,17 @@ import {
   indicativeValuationEmitter,
   IndicativeValuationEvents,
 } from "../../events/indicativeValuationEventEmitter";
+import {
+  computeChargeFee,
+  computeChargeFeeRange,
+  computeChargeFeeRangeNumber,
+  normalizeFeePercent,
+  resolveFeeAccessValueRange,
+  resolveFeeAccessValueNumber,
+  resolveFeeAccessValueRangeNumber,
+  sumComponentValueRangeNumber,
+  shouldAutoComputeChargeFee,
+} from "./indicativeValuation.calculation";
 
 const propertyCodeService = createPropertyCodeService(prisma as any);
 const propertyUploadService = createPropertyUploadService(FileUploadService as any);
@@ -67,8 +78,8 @@ function normalizeForcedSalePercent(percent?: number | string | Decimal | null) 
   if (percent === undefined || percent === null || percent === "") return 0;
   const numeric =
     percent instanceof Decimal ? Number(percent) : typeof percent === "string" ? Number(percent) : percent;
-  if (!Number.isFinite(numeric)) return 0;
-  return numeric;
+  if (!Number.isFinite(numeric) || numeric < 0) return 0;
+  return Math.min(100, Number(numeric.toFixed(2)));
 }
 
 function computeForcedSaleValue(maxValue: Decimal | number, percent?: number | string | Decimal | null) {
@@ -145,19 +156,63 @@ function serializeIndicativeValuation(record: any) {
 
   const rawComponents = record.components ?? record.indicativeComponents ?? [];
   const components = rawComponents.map(serializeComponent);
-  const minMarketValue = Number(record.minValue ?? 0);
-  const maxMarketValue = Number(record.maxValue ?? 0);
+  const componentTotals = sumComponentValueRangeNumber(rawComponents);
+  const minMarketValue = componentTotals.min ?? 0;
+  const maxMarketValue = componentTotals.max ?? 0;
   const forcedSalePercent =
     record.forcedSalePercent === null || record.forcedSalePercent === undefined
       ? null
       : normalizeForcedSalePercent(record.forcedSalePercent);
   const forcedSaleValue = Number(
-    record.forcedSaleValue ?? computeForcedSaleValue(record.maxValue ?? 0, forcedSalePercent)
+    record.forcedSaleValue ?? computeForcedSaleValue(maxMarketValue, forcedSalePercent)
   );
+  const accessValueRange =
+    record.minAccessValue != null ||
+    record.maxAccessValue != null
+      ? {
+          min: record.minAccessValue != null ? Number(record.minAccessValue) : null,
+          max: record.maxAccessValue != null ? Number(record.maxAccessValue) : null,
+        }
+      : resolveFeeAccessValueRangeNumber({
+          accessValue: record.accessValue,
+          fallbackMinAccessValue: minMarketValue,
+          fallbackMaxAccessValue: maxMarketValue,
+          treatMaxMatchAsAuto: true,
+        });
+  const accessValue =
+    accessValueRange.max ?? resolveFeeAccessValueNumber(record.accessValue, maxMarketValue);
+  const feeRate =
+    record.feeRate === null || record.feeRate === undefined ? null : normalizeFeePercent(record.feeRate);
+  const discount =
+    record.discount === null || record.discount === undefined ? null : normalizeFeePercent(record.discount);
+  const chargeFeeRange =
+    record.minChargeFee != null ||
+    record.maxChargeFee != null
+      ? {
+          min: record.minChargeFee != null ? Number(record.minChargeFee) : null,
+          max: record.maxChargeFee != null ? Number(record.maxChargeFee) : null,
+        }
+      : computeChargeFeeRangeNumber({
+          accessValue: record.accessValue,
+          fallbackMinAccessValue: minMarketValue,
+          fallbackMaxAccessValue: maxMarketValue,
+          feeRate: record.feeRate,
+          discount: record.discount,
+          treatMaxMatchAsAuto: true,
+        });
+  const computedChargeFee = computeChargeFee({
+    accessValue: record.accessValue,
+    fallbackAccessValue: maxMarketValue,
+    feeRate: record.feeRate,
+    discount: record.discount,
+  });
   const chargeFee =
-    record.chargeFee === null || record.chargeFee === undefined
-      ? null
-      : Number(record.chargeFee);
+    chargeFeeRange.max ??
+    (record.chargeFee === null || record.chargeFee === undefined
+      ? computedChargeFee === null
+        ? null
+        : Number(computedChargeFee)
+      : Number(record.chargeFee));
 
   return {
     ...record,
@@ -174,7 +229,18 @@ function serializeIndicativeValuation(record: any) {
     preparedFor: record.instructedBy,
     contactName: record.contactName ?? record.property?.dataSource?.contactName ?? null,
     contactTel: record.contactTel ?? record.property?.dataSource?.phoneNumber ?? null,
+    accessValue,
+    minAccessValue: accessValueRange.min,
+    maxAccessValue: accessValueRange.max,
+    feeRate,
+    discount,
     chargeFee,
+    minChargeFee:
+      chargeFeeRange.min ??
+      (record.chargeFee === null || record.chargeFee === undefined ? null : Number(record.chargeFee)),
+    maxChargeFee:
+      chargeFeeRange.max ??
+      (record.chargeFee === null || record.chargeFee === undefined ? null : Number(record.chargeFee)),
     intendedUse: record.intendedUse,
     purposeOfValuation: record.intendedUse,
     approved: record.approvedUser ?? record.approved ?? null,
@@ -237,21 +303,80 @@ async function refreshTotals(client: any, indicationId: number) {
     _sum: { minValue: true, maxValue: true },
   });
 
-  const valuation = await client.propertyIndicativeValuation.findUnique({
+  const valuation: any = await client.propertyIndicativeValuation.findUnique({
     where: { indicationId },
-    select: { forcedSalePercent: true },
+    select: {
+      forcedSalePercent: true,
+      accessValue: true,
+      minAccessValue: true,
+      maxAccessValue: true,
+      feeRate: true,
+      discount: true,
+      chargeFee: true,
+      minChargeFee: true,
+      maxChargeFee: true,
+    } as any,
+  });
+
+  const accessValueRange = resolveFeeAccessValueRange({
+    accessValue: valuation?.accessValue,
+    fallbackMinAccessValue: totals._sum.minValue ?? new Decimal(0),
+    fallbackMaxAccessValue: totals._sum.maxValue ?? new Decimal(0),
+    treatMaxMatchAsAuto: true,
+  });
+  const computedChargeFeeRange = computeChargeFeeRange({
+    accessValue: valuation?.accessValue,
+    fallbackMinAccessValue: totals._sum.minValue ?? new Decimal(0),
+    fallbackMaxAccessValue: totals._sum.maxValue ?? new Decimal(0),
+    feeRate: valuation?.feeRate,
+    discount: valuation?.discount,
+    treatMaxMatchAsAuto: true,
+  });
+  const computedChargeFee = computeChargeFee({
+    accessValue: valuation?.accessValue,
+    fallbackAccessValue: totals._sum.maxValue ?? new Decimal(0),
+    feeRate: valuation?.feeRate,
+    discount: valuation?.discount,
   });
 
   await client.propertyIndicativeValuation.update({
     where: { indicationId },
     data: {
-      minValue: totals._sum.minValue ?? new Decimal(0),
-      maxValue: totals._sum.maxValue ?? new Decimal(0),
+      minAccessValue: accessValueRange.min,
+      maxAccessValue: accessValueRange.max,
       forcedSaleValue: computeForcedSaleValue(
         totals._sum.maxValue ?? new Decimal(0),
         valuation?.forcedSalePercent,
       ),
-    },
+      chargeFee:
+        computedChargeFee ??
+        (shouldAutoComputeChargeFee({
+          accessValue: valuation?.accessValue,
+          feeRate: valuation?.feeRate,
+          discount: valuation?.discount,
+        })
+          ? null
+          : valuation?.chargeFee ?? null),
+      minChargeFee:
+        computedChargeFeeRange.min ??
+        (shouldAutoComputeChargeFee({
+          accessValue: valuation?.accessValue,
+          feeRate: valuation?.feeRate,
+          discount: valuation?.discount,
+        })
+          ? null
+          : valuation?.minChargeFee ?? valuation?.chargeFee ?? null),
+      maxChargeFee:
+        computedChargeFeeRange.max ??
+        (shouldAutoComputeChargeFee({
+          accessValue: valuation?.accessValue,
+          feeRate: valuation?.feeRate,
+          discount: valuation?.discount,
+        })
+          ? null
+          : valuation?.maxChargeFee ?? valuation?.chargeFee ?? null),
+    } as any,
+    select: { indicationId: true },
   });
 }
 
@@ -298,7 +423,7 @@ function getIndicativePdfMissingFields(indication: IndicativeValuationWithRelati
     missingFields.push("Property Type");
   }
 
-  indication.components.forEach((component, index) => {
+  indication.components.forEach((component: any, index: number) => {
     const componentLabel = `Component ${index + 1}`;
 
     if (!hasNonEmptyText(component.description)) {
@@ -379,6 +504,12 @@ async function generateStoredIndicativePdf(indicationId: number) {
       indicativePdfMimeType: "application/pdf",
       indicativePdfFileSize: buffer.length,
       indicativePdfGeneratedAt: new Date(),
+    },
+    select: {
+      indicativePdfFileName: true,
+      indicativePdfMimeType: true,
+      indicativePdfFileSize: true,
+      indicativePdfGeneratedAt: true,
     },
   });
 
@@ -738,6 +869,28 @@ export const indicativeValuationService = {
         dto.maxRate
       );
       const forcedSalePercent = normalizeForcedSalePercent(dto.forcedSalePercent);
+      const feeRate = normalizeFeePercent(dto.feeRate);
+      const discount = normalizeFeePercent(dto.discount);
+      const accessValueRange = resolveFeeAccessValueRange({
+        accessValue: dto.accessValue,
+        fallbackMinAccessValue: minValue,
+        fallbackMaxAccessValue: maxValue,
+        treatMaxMatchAsAuto: true,
+      });
+      const computedChargeFeeRange = computeChargeFeeRange({
+        accessValue: dto.accessValue,
+        fallbackMinAccessValue: minValue,
+        fallbackMaxAccessValue: maxValue,
+        feeRate: dto.feeRate,
+        discount: dto.discount,
+        treatMaxMatchAsAuto: true,
+      });
+      const computedChargeFee = computeChargeFee({
+        accessValue: dto.accessValue,
+        fallbackAccessValue: maxValue,
+        feeRate: dto.feeRate,
+        discount: dto.discount,
+      });
       const requestedIndicationNo = resolveIndicationNo(dto);
       const temporaryIndicationNo = requestedIndicationNo ?? buildTemporaryIndicationNo();
       const initialWorkflowStatus = requestedWorkflowStatus ?? WorkflowStatus.DRAFT;
@@ -753,9 +906,20 @@ export const indicativeValuationService = {
           intendedUse: resolveIntendedUse(dto),
           contactName: normalizeText(dto.contactName),
           contactTel: normalizeText(dto.contactTel),
-          chargeFee: dto.chargeFee != null ? new Decimal(dto.chargeFee) : null,
-          minValue,
-          maxValue,
+          accessValue: dto.accessValue != null ? new Decimal(dto.accessValue) : null,
+          minAccessValue: accessValueRange.min,
+          maxAccessValue: accessValueRange.max,
+          feeRate: dto.feeRate != null ? new Decimal(feeRate) : null,
+          discount: dto.discount != null ? new Decimal(discount) : null,
+          chargeFee:
+            computedChargeFee ??
+            (dto.chargeFee != null ? new Decimal(dto.chargeFee) : null),
+          minChargeFee:
+            computedChargeFeeRange.min ??
+            (dto.chargeFee != null ? new Decimal(dto.chargeFee) : null),
+          maxChargeFee:
+            computedChargeFeeRange.max ??
+            (dto.chargeFee != null ? new Decimal(dto.chargeFee) : null),
           forcedSalePercent:
             dto.forcedSalePercent != null ? new Decimal(forcedSalePercent) : null,
           forcedSaleValue: computeForcedSaleValue(maxValue, dto.forcedSalePercent),
@@ -769,6 +933,7 @@ export const indicativeValuationService = {
           createdByUser: { connect: { id: createdBy } },
           updatedByUser: { connect: { id: createdBy } },
         } as any,
+        select: { indicationId: true },
       });
 
       const indicationNo =
@@ -778,6 +943,7 @@ export const indicativeValuationService = {
         await tx.propertyIndicativeValuation.update({
           where: { indicationId: indication.indicationId },
           data: { indicationNo },
+          select: { indicationId: true },
         });
       }
 
@@ -858,6 +1024,7 @@ export const indicativeValuationService = {
           workflowStatus: WorkflowStatus.PENDING_REVIEW,
           updatedByUser: { connect: { id: userId } },
         },
+        select: { indicationId: true },
       });
 
       await repository.auditLog(tx, {
@@ -915,6 +1082,7 @@ export const indicativeValuationService = {
           approvedUser: { connect: { id: approverId } },
           updatedByUser: { connect: { id: approverId } },
         },
+        select: { indicationId: true },
       });
 
       await repository.auditLog(tx, {
@@ -961,6 +1129,7 @@ export const indicativeValuationService = {
           rejectionReason: dto.rejectionReason,
           updatedByUser: { connect: { id: rejectorId } },
         },
+        select: { indicationId: true },
       });
 
       await repository.auditLog(tx, {
@@ -1242,6 +1411,32 @@ export const indicativeValuationService = {
       const resolvedForcedSalePercentInput =
         dto.forcedSalePercent !== undefined ? dto.forcedSalePercent : existing.forcedSalePercent;
       const forcedSalePercent = normalizeForcedSalePercent(resolvedForcedSalePercentInput);
+      const resolvedAccessValueInput =
+        dto.accessValue !== undefined ? dto.accessValue : existing.accessValue;
+      const resolvedFeeRateInput = dto.feeRate !== undefined ? dto.feeRate : existing.feeRate;
+      const resolvedDiscountInput = dto.discount !== undefined ? dto.discount : existing.discount;
+      const feeRate = normalizeFeePercent(resolvedFeeRateInput);
+      const discount = normalizeFeePercent(resolvedDiscountInput);
+      const accessValueRange = resolveFeeAccessValueRange({
+        accessValue: resolvedAccessValueInput,
+        fallbackMinAccessValue: minValue,
+        fallbackMaxAccessValue: maxValue,
+        treatMaxMatchAsAuto: true,
+      });
+      const computedChargeFeeRange = computeChargeFeeRange({
+        accessValue: resolvedAccessValueInput,
+        fallbackMinAccessValue: minValue,
+        fallbackMaxAccessValue: maxValue,
+        feeRate: resolvedFeeRateInput,
+        discount: resolvedDiscountInput,
+        treatMaxMatchAsAuto: true,
+      });
+      const computedChargeFee = computeChargeFee({
+        accessValue: resolvedAccessValueInput,
+        fallbackAccessValue: maxValue,
+        feeRate: resolvedFeeRateInput,
+        discount: resolvedDiscountInput,
+      });
 
       await tx.propertyIndicativeValuation.update({
         where: { indicationId },
@@ -1262,9 +1457,50 @@ export const indicativeValuationService = {
           ...(dto.contactTel !== undefined
             ? { contactTel: normalizeText(dto.contactTel) }
             : {}),
-          ...(dto.chargeFee !== undefined
-            ? { chargeFee: dto.chargeFee != null ? new Decimal(dto.chargeFee) : null }
+          ...(dto.accessValue !== undefined
+            ? { accessValue: dto.accessValue != null ? new Decimal(dto.accessValue) : null }
             : {}),
+          minAccessValue: accessValueRange.min,
+          maxAccessValue: accessValueRange.max,
+          ...(dto.feeRate !== undefined
+            ? { feeRate: dto.feeRate != null ? new Decimal(feeRate) : null }
+            : {}),
+          ...(dto.discount !== undefined
+            ? { discount: dto.discount != null ? new Decimal(discount) : null }
+            : {}),
+          ...(dto.chargeFee !== undefined
+            ? {
+                chargeFee:
+                  computedChargeFee ??
+                  (dto.chargeFee != null ? new Decimal(dto.chargeFee) : null),
+              }
+            : computedChargeFee !== null
+              ? { chargeFee: computedChargeFee }
+              : {}
+          ),
+          ...(dto.chargeFee === undefined &&
+          computedChargeFee === null &&
+          shouldAutoComputeChargeFee({
+            accessValue: resolvedAccessValueInput,
+            feeRate: resolvedFeeRateInput,
+            discount: resolvedDiscountInput,
+          })
+            ? { chargeFee: null }
+            : {}),
+          minChargeFee:
+            computedChargeFeeRange.min ??
+            (dto.chargeFee !== undefined
+              ? dto.chargeFee != null
+                ? new Decimal(dto.chargeFee)
+                : null
+              : (existing as any).minChargeFee ?? existing.chargeFee ?? null),
+          maxChargeFee:
+            computedChargeFeeRange.max ??
+            (dto.chargeFee !== undefined
+              ? dto.chargeFee != null
+                ? new Decimal(dto.chargeFee)
+                : null
+              : (existing as any).maxChargeFee ?? existing.chargeFee ?? null),
           ...(dto.valuerId !== undefined
             ? { valuer: { connect: { id: dto.valuerId } } }
             : {}),
@@ -1310,6 +1546,7 @@ export const indicativeValuationService = {
               : {}),
           updatedByUser: { connect: { id: userId } },
         } as any,
+        select: { indicationId: true },
       });
 
       if (primaryComponent) {
@@ -1355,7 +1592,7 @@ export const indicativeValuationService = {
           area: resolvedArea,
           minRate,
           maxRate,
-        },
+        } as any,
       });
     });
 
@@ -1422,6 +1659,7 @@ export const indicativeValuationService = {
             ? `${valuation.internalNotes}\n[System]: Reassigned to User ${newValuerId} by User ${actorId}`
             : `[System]: Reassigned to User ${newValuerId} by User ${actorId}`,
         },
+        select: { indicationId: true },
       });
 
       await repository.auditLog(tx, {
@@ -1469,6 +1707,7 @@ export const indicativeValuationService = {
           status: PropertyIndicativeValuationStatus.CANCELLED,
           updatedByUser: { connect: { id: actorId } },
         },
+        select: { indicationId: true },
       });
 
       await repository.auditLog(tx, {
