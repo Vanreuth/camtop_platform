@@ -17,6 +17,7 @@ volumes:
   npm_letsencrypt:
   postgres_data:
   backups:
+  redisinsight_data:
 
 services:
 
@@ -79,6 +80,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ── RedisInsight UI ───────────────────────────────
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: property_valuation_redisinsight
+    restart: unless-stopped
+    volumes:
+      - redisinsight_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+      - proxy
+    expose:
+      - "5540"
 
   # ── Backend API (Node / Express / Prisma) ───
   backend:
