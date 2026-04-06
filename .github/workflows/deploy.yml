@@ -1,90 +1,142 @@
-name: Property Valuation System
+# ═══════════════════════════════════════════════════════════════════════════
+#  CamTop Property Valuation – CI/CD Pipeline
+#
+#  Triggers:
+#    - Push to main     → lint + type-check → deploy all
+#    - Manual dispatch  → lint + deploy (choose target: all/backend/frontend)
+#    - Daily schedule   → DB backup only
+#
+#  Runner: self-hosted on Contabo VPS (free, no GitHub minute limits)
+# ═══════════════════════════════════════════════════════════════════════════
+
+name: Deploy CamTop Property Valuation
 
 on:
   push:
     branches: [main]
-  workflow_dispatch:        # manual trigger from GitHub UI
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - ".gitignore"
+
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deploy target"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - backend
+          - frontend
+      skip_checks:
+        description: "Skip lint & type-check?"
+        required: false
+        default: false
+        type: boolean
+
   schedule:
     - cron: "0 19 * * *"   # 19:00 UTC = 02:00 next day Asia/Phnom_Penh
 
 concurrency:
   group: production-deploy
-  cancel-in-progress: false  # never cancel a running deploy
+  cancel-in-progress: false   # never cancel a running deploy
 
+# ─────────────────────────────────────────────────────────────────────────
 jobs:
+
   # ─────────────────────────────────────────────────
-  # JOB 1: Lint & Type-check (runs on GitHub runner)
+  # JOB 1: Lint & Type-check
   # ─────────────────────────────────────────────────
   lint-and-check:
     name: 🔍 Lint & Type-check
-    runs-on: self-hosted   # runs on Contabo VPS – free, no minute limits
-    if: github.event_name != 'schedule'   # skip lint on scheduled backups
+    runs-on: self-hosted
+    if: |
+      github.event_name != 'schedule' &&
+      !(github.event_name == 'workflow_dispatch' && github.event.inputs.skip_checks == 'true')
+
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: |
-            property_valution_api/package-lock.json
-            property_valution_system/package-lock.json
 
-      - name: Install backend deps
+      - name: Install & type-check backend
         working-directory: property_valution_api
-        run: npm ci
+        run: |
+          npm install --prefer-offline --no-audit
+          npx tsc --noEmit
 
-      - name: Type-check backend
-        working-directory: property_valution_api
-        run: npx tsc --noEmit
-
-      - name: Install frontend deps
+      - name: Install & type-check frontend
         working-directory: property_valution_system
-        run: npm install   # npm ci fails on Linux with Windows-generated lock file
-
-      - name: Type-check frontend
-        working-directory: property_valution_system
-        run: npx tsc --noEmit
+        run: |
+          npm install --prefer-offline --no-audit
+          npx tsc --noEmit
 
   # ─────────────────────────────────────────────────
-  # JOB 2: Deploy to Contabo VPS via SSH
+  # JOB 2: Deploy to Contabo VPS
   # ─────────────────────────────────────────────────
   deploy:
     name: 🐳 Deploy to Contabo
-    runs-on: self-hosted   # runs directly on VPS – no SSH needed
+    runs-on: self-hosted
     needs: lint-and-check
     if: |
-      github.event_name == 'push' ||
-      github.event_name == 'workflow_dispatch'
+      always() &&
+      (needs.lint-and-check.result == 'success' || needs.lint-and-check.result == 'skipped') &&
+      github.event_name != 'schedule'
     environment: production
 
     steps:
+      - name: Determine deploy target
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.target }}" >> $GITHUB_OUTPUT
+          else
+            echo "value=all" >> $GITHUB_OUTPUT
+          fi
+
       - name: Deploy
         run: |
           set -euo pipefail
           export DEPLOY_PATH="/opt/property-valuation"
-          bash "/opt/property-valuation/infra/scripts/deploy.sh"
+          bash "/opt/property-valuation/infra/scripts/deploy.sh" "${{ steps.target.outputs.value }}"
 
       - name: ✅ Deployment succeeded
         if: success()
-        run: echo "Deployment to Contabo VPS succeeded at $(date -u '+%Y-%m-%d %H:%M UTC')"
+        run: |
+          echo "### ✅ Deployment Succeeded" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target:** ${{ steps.target.outputs.value }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time:** $(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
 
       - name: ❌ Deployment failed
         if: failure()
-        run: echo "Deployment FAILED. Check server → /var/log/property-valuation-deploy.log"
+        run: |
+          echo "### ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
+          echo "Check server logs: \`/var/log/property-valuation-deploy.log\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Recent logs:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -30 /var/log/property-valuation-deploy.log >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "Log file not found"
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
   # ─────────────────────────────────────────────────
   # JOB 3: Scheduled daily DB backup
   # ─────────────────────────────────────────────────
   scheduled-backup:
     name: 💾 Daily DB Backup
-    runs-on: self-hosted   # runs directly on VPS
+    runs-on: self-hosted
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Run DB backup
         run: |
-          docker exec property_valuation_db_backup sh /backup-db.sh
-          echo "✅ Backup completed at $(date)"
+          echo "### 💾 Database Backup" >> $GITHUB_STEP_SUMMARY
+          docker exec property_valuation_db_backup sh /backup-db.sh 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Backup completed at $(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_STEP_SUMMARY
