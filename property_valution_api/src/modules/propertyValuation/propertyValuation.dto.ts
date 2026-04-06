@@ -80,7 +80,7 @@ const createPropertyForValuationSchema = z.object({
 const basePropertyValuationSchema = z.object({
   propertyId: z.number().int().positive().optional(),
   property: createPropertyForValuationSchema,
-  valuationNo: z.string().min(1).max(50),
+  valuationNo: z.string().min(1).max(50).optional(),
   landValue: z.number().nonnegative().optional(),
   buildingValue: z.number().nonnegative().optional(),
   marketValue: z.number().nonnegative(),

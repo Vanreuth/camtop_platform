@@ -575,7 +575,7 @@ export default function AddPropertyValuationPage() {
       { value: "SALES_COMPARISON_APPROACH", label: t("methodLabels.SALES_COMPARISON") },
       { value: "INCOME_APPROACH", label: t("methodLabels.INCOME_APPROACH") },
       { value: "COST_APPROACH", label: t("methodLabels.COST_APPROACH") },
-      { value: " SALES_AND_COST_APPROACH", label: t("methodLabels.SALES_AND_COST") },
+      { value: "SALES_AND_COST_APPROACH", label: t("methodLabels.SALES_AND_COST") },
     ],
     [t]
   );
@@ -1434,7 +1434,12 @@ export default function AddPropertyValuationPage() {
   ]);
 
   return (
-    <PermissionGuard maxHierarchyLevel={3} redirectTo="/dashboard">
+    <PermissionGuard
+      maxHierarchyLevel={3}
+      requiredPermissions={["property:read", "dashboard:read"]}
+      requireAllPermissions={false}
+      redirectTo="/dashboard"
+    >
       <div className="min-h-dvh bg-gradient-to-br from-background via-background to-muted/20">
         <PropertyPageHeader
           title={t("createTitle")}
@@ -2167,7 +2172,7 @@ function ValuationDetailsSection({
             name="valuationNo"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>ValuationNo<span className="text-red-500">*</span></FormLabel>
+                <FormLabel>ValuationNo</FormLabel>
                 <FormControl>
                   <Input
                     placeholder={t("valuationNoPlaceholder")}
@@ -2177,6 +2182,7 @@ function ValuationDetailsSection({
                     className="h-11"
                   />
                 </FormControl>
+                <FormDescription>Leave blank to auto-generate.</FormDescription>
                 <FormMessage />
               </FormItem>
             )}

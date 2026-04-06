@@ -779,6 +779,7 @@ export class PropertyService {
     files: FileField | undefined,
     userId: number,
     userHierarchyLevel: number,
+    userPermissions: string[] = [],
   ) {
     const existing = await prisma.property.findFirst({
       where: { propertyId, workflowStatus: { not: WorkflowStatus.ARCHIVED } },
@@ -798,25 +799,29 @@ export class PropertyService {
 
     const isOwner = existing.createdBy === userId;
     const isAdminOrManager = userHierarchyLevel <= 2;
-   // 2. Permission Check (Owner OR Admin/Manager)
-  if (!isOwner && !isAdminOrManager) {
-    throw new ForbiddenError("You do not have permission to update this property");
-  }
+    const hasExplicitUpdatePermission =
+      userPermissions.includes("property:update") ||
+      userPermissions.includes("property:manage");
 
-  if (!isAdminOrManager) {
-    if (data.status !== undefined && data.status !== existing.status) {
-      throw new ForbiddenError("Only admins/managers can change property status");
+    // 2. Permission Check (Owner OR Admin/Manager OR explicit property update permission)
+    if (!isOwner && !isAdminOrManager && !hasExplicitUpdatePermission) {
+      throw new ForbiddenError("You do not have permission to update this property");
     }
 
-    if (
-      data.workflowStatus !== undefined &&
-      data.workflowStatus !== existing.workflowStatus
-    ) {
-      throw new ForbiddenError(
-        "Only admins/managers can change property workflow status",
-      );
+    if (!isAdminOrManager) {
+      if (data.status !== undefined && data.status !== existing.status) {
+        throw new ForbiddenError("Only admins/managers can change property status");
+      }
+
+      if (
+        data.workflowStatus !== undefined &&
+        data.workflowStatus !== existing.workflowStatus
+      ) {
+        throw new ForbiddenError(
+          "Only admins/managers can change property workflow status",
+        );
+      }
     }
-  }
 
   // 3. Status Lock Check
   // Admins/Managers (level <= 2) can usually bypass the "Draft/Rejected" requirement
