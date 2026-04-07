@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { type FieldErrors, useForm } from "react-hook-form";
+import { type FieldErrors, type FieldPath, useForm } from "react-hook-form";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/lib/navigation";
 import {
@@ -281,6 +281,8 @@ const invalidFieldTabMap = {
 } as const satisfies Partial<
   Record<keyof ManualFormValues, "introduction" | "property" | "valuation">
 >;
+
+type InvalidFieldName = Extract<keyof typeof invalidFieldTabMap, FieldPath<ManualFormValues>>;
 
 // ============================================
 // 🔧 UTILS
@@ -702,9 +704,9 @@ export default function AddPropertyValuationPage() {
 
   const handleInvalidSubmit = useCallback(
     (errors: FieldErrors<ManualFormValues>) => {
-      const orderedInvalidFields = Object.keys(invalidFieldTabMap).filter(
-        (field) => Boolean(errors[field as keyof ManualFormValues])
-      ) as Array<keyof typeof invalidFieldTabMap>;
+      const orderedInvalidFields = (Object.keys(invalidFieldTabMap) as InvalidFieldName[]).filter(
+        (field) => Boolean(errors[field])
+      );
 
       if (!orderedInvalidFields.length) {
         toast.error("Please complete the required fields.");
@@ -712,14 +714,14 @@ export default function AddPropertyValuationPage() {
       }
 
       const messages = orderedInvalidFields
-        .map((field) => errors[field as keyof ManualFormValues]?.message)
+        .map((field) => errors[field]?.message)
         .filter((message): message is string => typeof message === "string" && message.trim().length > 0);
 
       [...new Set(messages)].slice(0, 5).forEach((message) => toast.error(message));
 
       const firstField = orderedInvalidFields[0];
       setCurrentTab(invalidFieldTabMap[firstField]);
-      form.setFocus(firstField as keyof ManualFormValues);
+      form.setFocus(firstField);
     },
     [form]
   );

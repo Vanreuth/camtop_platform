@@ -852,7 +852,7 @@ export const indicativeValuationService = {
       }
 
       const componentType = dto.componentType ?? IndicativeComponentType.LAND;
-      let resolvedArea = dto.area;
+      let resolvedArea: number | undefined = dto.area;
 
       if (resolvedArea === undefined) {
         resolvedArea = await deriveComponentArea(tx, propertyId, componentType);

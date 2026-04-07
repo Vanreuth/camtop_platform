@@ -238,15 +238,14 @@ const buildingSchema = z
 const transactionSchema = z.object({
   transactionId: z.number().int().positive().optional(),
   transactionType: z.nativeEnum(TransactionType, {
-    required_error: "Transaction type is required",
+    error: "Transaction type is required",
   }),
   transactionDate: z
     .union([z.string().trim().min(1, "Transaction date is required"), z.date()])
     .pipe(z.coerce.date()),
   totalPrice: z.coerce
     .number({
-      required_error: "Total price is required",
-      invalid_type_error: "Total price is required",
+      error: "Total price is required",
     })
     .positive("Total price must be positive"),
   valuationId: z.number().int().positive().optional(),
