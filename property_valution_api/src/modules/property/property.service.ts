@@ -479,7 +479,11 @@ export class PropertyService {
   ) {
   if (!data.propertyTypeId) throw new BadRequestError("Property type is required");
   if (!data.createdBy) throw new BadRequestError("Created by user ID is required");
-  if (!data.transaction?.totalPrice) throw new BadRequestError("Transaction totalPrice is required");
+  if (!data.transaction?.transactionType) throw new BadRequestError("Transaction type is required");
+  if (!data.transaction?.transactionDate) throw new BadRequestError("Transaction date is required");
+  if (data.transaction?.totalPrice === undefined || data.transaction.totalPrice === null) {
+    throw new BadRequestError("Transaction totalPrice is required");
+  }
 
   const { propertyType } = await validatePropertyData(data);
 
@@ -779,7 +783,6 @@ export class PropertyService {
     files: FileField | undefined,
     userId: number,
     userHierarchyLevel: number,
-    userPermissions: string[] = [],
   ) {
     const existing = await prisma.property.findFirst({
       where: { propertyId, workflowStatus: { not: WorkflowStatus.ARCHIVED } },
@@ -799,29 +802,25 @@ export class PropertyService {
 
     const isOwner = existing.createdBy === userId;
     const isAdminOrManager = userHierarchyLevel <= 2;
-    const hasExplicitUpdatePermission =
-      userPermissions.includes("property:update") ||
-      userPermissions.includes("property:manage");
+   // 2. Permission Check (Owner OR Admin/Manager)
+  if (!isOwner && !isAdminOrManager) {
+    throw new ForbiddenError("You do not have permission to update this property");
+  }
 
-    // 2. Permission Check (Owner OR Admin/Manager OR explicit property update permission)
-    if (!isOwner && !isAdminOrManager && !hasExplicitUpdatePermission) {
-      throw new ForbiddenError("You do not have permission to update this property");
+  if (!isAdminOrManager) {
+    if (data.status !== undefined && data.status !== existing.status) {
+      throw new ForbiddenError("Only admins/managers can change property status");
     }
 
-    if (!isAdminOrManager) {
-      if (data.status !== undefined && data.status !== existing.status) {
-        throw new ForbiddenError("Only admins/managers can change property status");
-      }
-
-      if (
-        data.workflowStatus !== undefined &&
-        data.workflowStatus !== existing.workflowStatus
-      ) {
-        throw new ForbiddenError(
-          "Only admins/managers can change property workflow status",
-        );
-      }
+    if (
+      data.workflowStatus !== undefined &&
+      data.workflowStatus !== existing.workflowStatus
+    ) {
+      throw new ForbiddenError(
+        "Only admins/managers can change property workflow status",
+      );
     }
+  }
 
   // 3. Status Lock Check
   // Admins/Managers (level <= 2) can usually bypass the "Draft/Rejected" requirement
@@ -842,7 +841,8 @@ export class PropertyService {
   let newWorkflowStatus: WorkflowStatus | undefined = data.workflowStatus;
   if (
     existing.workflowStatus === WorkflowStatus.REJECTED &&
-    newWorkflowStatus === undefined
+    newWorkflowStatus === undefined &&
+    !data.status
   ) {
     newWorkflowStatus = WorkflowStatus.DRAFT;
   }

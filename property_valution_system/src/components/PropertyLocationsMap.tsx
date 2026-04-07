@@ -48,6 +48,10 @@ interface AddressFilter {
 
 type MapSearchMode = "none" | "circle" | "polygon" | "rectangle";
 type DrawSearchShapeType = Exclude<MapSearchMode, "none">;
+type SearchShapeOverlay =
+  | google.maps.Polygon
+  | google.maps.Rectangle
+  | google.maps.Circle;
 type CoverageFilter =
   | "all"
   | "property_only"
@@ -144,6 +148,7 @@ export default function PropertyLocationsMap({
 }: PropertyLocationsMapProps) {
   const MAX_AUTO_ZOOM = 16;
   const PLACE_FALLBACK_ZOOM = 15;
+  const effectiveMapId = googleMapsMapId || "DEMO_MAP_ID";
   const locale = useLocale();
   const containerRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
@@ -174,21 +179,33 @@ export default function PropertyLocationsMap({
   const [totalDistance, setTotalDistance] = useState<number>(0);
 
   // Area Search State
-  const searchShapeRef = useRef<
-    google.maps.Polygon | google.maps.Rectangle | google.maps.Circle | null
-  >(null);
-  const drawingManagerRef = useRef<google.maps.drawing.DrawingManager | null>(null);
+  const searchShapeRef = useRef<SearchShapeOverlay | null>(null);
   const searchShapeListenersRef = useRef<google.maps.MapsEventListener[]>([]);
+  const draftSearchOverlayRef = useRef<SearchShapeOverlay | null>(null);
+  const draftSearchAnchorRef = useRef<google.maps.LatLngLiteral | null>(null);
+  const draftSearchPolygonPointsRef = useRef<google.maps.LatLngLiteral[]>([]);
   const [drawnSearchShape, setDrawnSearchShape] = useState<{
     type: DrawSearchShapeType;
   } | null>(null);
+  const [hasSearchDraft, setHasSearchDraft] = useState(false);
+  const [draftPolygonPointCount, setDraftPolygonPointCount] = useState(0);
 
   const searchBoxRef = useRef<google.maps.places.SearchBox | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const streetViewLayerRef = useRef<google.maps.StreetViewCoverageLayer | null>(null);
   const lastSearchResetTokenRef = useRef(searchResetToken);
-
   const normalizedSearchMode = searchMode ?? "none";
+  const normalizedSearchModeRef = useRef(normalizedSearchMode);
+  const mapLibraries = useMemo<("geometry" | "marker")[]>(
+    () => ["geometry", "marker"],
+    [],
+  );
+  const mapProviderKey = `${effectiveMapId}:${mapLibraries.join(",")}`;
+
+  useEffect(() => {
+    normalizedSearchModeRef.current = normalizedSearchMode;
+  }, [normalizedSearchMode]);
+
   const displayedProperties = useMemo(() => {
     if (activeSearchPropertyIds === null) return properties;
     const propertyIds = new Set(activeSearchPropertyIds);
@@ -332,6 +349,19 @@ export default function PropertyLocationsMap({
     );
     searchShapeListenersRef.current = [];
   }, []);
+
+  const resetSearchDraftState = useCallback(() => {
+    draftSearchOverlayRef.current = null;
+    draftSearchAnchorRef.current = null;
+    draftSearchPolygonPointsRef.current = [];
+    setHasSearchDraft(false);
+    setDraftPolygonPointCount(0);
+  }, []);
+
+  const clearSearchDraftOverlay = useCallback(() => {
+    draftSearchOverlayRef.current?.setMap(null);
+    resetSearchDraftState();
+  }, [resetSearchDraftState]);
 
   const getPolygonCoordinates = useCallback(
     (
@@ -539,6 +569,7 @@ export default function PropertyLocationsMap({
 
   const clearSearchShape = useCallback(
     (notify = true) => {
+      clearSearchDraftOverlay();
       clearSearchShapeListeners();
       if (searchShapeRef.current) {
         searchShapeRef.current.setMap(null);
@@ -550,34 +581,109 @@ export default function PropertyLocationsMap({
         onSearchClear?.();
       }
     },
-    [clearSearchShapeListeners, onSearchClear, onSearchResultChange],
-  );
-
-  const getDrawingModeForSearch = useCallback(
-    (mode: MapSearchMode) => {
-      if (!window.google?.maps?.drawing) return null;
-
-      switch (mode) {
-        case "polygon":
-          return google.maps.drawing.OverlayType.POLYGON;
-        case "rectangle":
-          return google.maps.drawing.OverlayType.RECTANGLE;
-        case "circle":
-          return google.maps.drawing.OverlayType.CIRCLE;
-        default:
-          return null;
-      }
-    },
-    [],
+    [
+      clearSearchDraftOverlay,
+      clearSearchShapeListeners,
+      onSearchClear,
+      onSearchResultChange,
+    ],
   );
 
   const handleSearchClear = useCallback(() => {
     clearSearchShape(true);
-    const drawingMode = getDrawingModeForSearch(normalizedSearchMode);
-    if (drawingManagerRef.current) {
-      drawingManagerRef.current.setDrawingMode(drawingMode);
+  }, [clearSearchShape]);
+
+  const finalizeCompletedSearchShape = useCallback(
+    (shape: SearchShapeOverlay, type: DrawSearchShapeType) => {
+      clearSearchShapeListeners();
+      if (searchShapeRef.current) {
+        searchShapeRef.current.setMap(null);
+        searchShapeRef.current = null;
+      }
+      setDrawnSearchShape(null);
+      resetSearchDraftState();
+      searchShapeRef.current = shape;
+      styleSearchShape(shape, type);
+      attachSearchShapeListeners(shape, type);
+      setDrawnSearchShape({ type });
+      updateSearchResultFromShape(shape, type);
+    },
+    [
+      attachSearchShapeListeners,
+      clearSearchShapeListeners,
+      resetSearchDraftState,
+      styleSearchShape,
+      updateSearchResultFromShape,
+    ],
+  );
+
+  const completePolygonSearchDraft = useCallback(() => {
+    if (!map) return;
+
+    const points = draftSearchPolygonPointsRef.current;
+    if (points.length < 3) return;
+
+    const polygon =
+      draftSearchOverlayRef.current &&
+      typeof (draftSearchOverlayRef.current as google.maps.Polygon).getPath ===
+        "function"
+        ? (draftSearchOverlayRef.current as google.maps.Polygon)
+        : new google.maps.Polygon({
+            map,
+            paths: points,
+            clickable: false,
+            fillColor: "#2563eb",
+            fillOpacity: 0.18,
+            strokeColor: "#2563eb",
+            strokeWeight: 2,
+          });
+
+    polygon.setPaths(points);
+    finalizeCompletedSearchShape(polygon, "polygon");
+  }, [finalizeCompletedSearchShape, map]);
+
+  const undoPolygonSearchPoint = useCallback(() => {
+    const nextPoints = draftSearchPolygonPointsRef.current.slice(0, -1);
+    draftSearchPolygonPointsRef.current = nextPoints;
+    setDraftPolygonPointCount(nextPoints.length);
+    setHasSearchDraft(nextPoints.length > 0);
+
+    if (!nextPoints.length) {
+      clearSearchDraftOverlay();
+      return;
     }
-  }, [clearSearchShape, getDrawingModeForSearch, normalizedSearchMode]);
+
+    const polygon =
+      draftSearchOverlayRef.current &&
+      typeof (draftSearchOverlayRef.current as google.maps.Polygon).getPath ===
+        "function"
+        ? (draftSearchOverlayRef.current as google.maps.Polygon)
+        : map
+          ? new google.maps.Polygon({
+              map,
+              paths: nextPoints,
+              clickable: false,
+              fillColor: "#2563eb",
+              fillOpacity: 0.18,
+              strokeColor: "#2563eb",
+              strokeWeight: 2,
+            })
+          : null;
+
+    if (!polygon) return;
+
+    polygon.setPaths(nextPoints);
+    polygon.setOptions({
+      clickable: false,
+      draggable: false,
+      editable: false,
+      fillColor: "#2563eb",
+      fillOpacity: 0.18,
+      strokeColor: "#2563eb",
+      strokeWeight: 2,
+    });
+    draftSearchOverlayRef.current = polygon;
+  }, [clearSearchDraftOverlay, map]);
 
   const handlePinMapClick = useCallback((latLng: google.maps.LatLng) => {
     if (!map) return;
@@ -712,101 +818,286 @@ export default function PropertyLocationsMap({
   ]);
 
   useEffect(() => {
-    if (!map || !window.google?.maps?.drawing) return;
+    if (!map) return;
 
-    if (!drawingManagerRef.current) {
-      const drawingManager = new google.maps.drawing.DrawingManager({
-        drawingControl: false,
-        map,
-        polygonOptions: {
-          clickable: false,
-          draggable: true,
-          editable: true,
-          strokeColor: "#2563eb",
-          strokeOpacity: 0.9,
-          strokeWeight: 2,
-          fillColor: "#2563eb",
-          fillOpacity: 0.16,
+    if (normalizedSearchMode === "none" || drawnSearchShape) {
+      clearSearchDraftOverlay();
+      map.setOptions({ disableDoubleClickZoom: false });
+      return;
+    }
+
+    const createBoundsFromPoints = (
+      start: google.maps.LatLngLiteral,
+      end: google.maps.LatLngLiteral,
+    ) =>
+      new google.maps.LatLngBounds(
+        {
+          lat: Math.min(start.lat, end.lat),
+          lng: Math.min(start.lng, end.lng),
         },
-        rectangleOptions: {
-          clickable: false,
-          draggable: true,
-          editable: true,
-          strokeColor: "#2563eb",
-          strokeOpacity: 0.9,
-          strokeWeight: 2,
-          fillColor: "#2563eb",
-          fillOpacity: 0.16,
-        },
-        circleOptions: {
-          clickable: false,
-          draggable: true,
-          editable: true,
-          strokeColor: "#2563eb",
-          strokeOpacity: 0.9,
-          strokeWeight: 2,
-          fillColor: "#2563eb",
-          fillOpacity: 0.16,
-        },
-      });
-
-      drawingManager.addListener(
-        "overlaycomplete",
-        (event: google.maps.drawing.OverlayCompleteEvent) => {
-        const overlayType = event.type;
-        let type: DrawSearchShapeType | null = null;
-
-        if (overlayType === google.maps.drawing.OverlayType.POLYGON) {
-          type = "polygon";
-        } else if (overlayType === google.maps.drawing.OverlayType.RECTANGLE) {
-          type = "rectangle";
-        } else if (overlayType === google.maps.drawing.OverlayType.CIRCLE) {
-          type = "circle";
-        }
-
-        if (!type) {
-          (
-            event.overlay as
-              | google.maps.Polygon
-              | google.maps.Rectangle
-              | google.maps.Circle
-          ).setMap(null);
-          return;
-        }
-
-        clearSearchShape(false);
-        const overlay = event.overlay as
-          | google.maps.Polygon
-          | google.maps.Rectangle
-          | google.maps.Circle;
-        searchShapeRef.current = overlay;
-        styleSearchShape(overlay, type);
-        attachSearchShapeListeners(overlay, type);
-        setDrawnSearchShape({ type });
-        updateSearchResultFromShape(overlay, type);
-        drawingManager.setDrawingMode(null);
+        {
+          lat: Math.max(start.lat, end.lat),
+          lng: Math.max(start.lng, end.lng),
         },
       );
 
-      drawingManagerRef.current = drawingManager;
-    }
+    map.setOptions({ disableDoubleClickZoom: normalizedSearchMode === "polygon" });
 
-    drawingManagerRef.current.setMap(map);
-    drawingManagerRef.current.setDrawingMode(
-      getDrawingModeForSearch(normalizedSearchMode),
+    const clickListener = map.addListener("click", (event: google.maps.MapMouseEvent) => {
+      if (!event.latLng) return;
+
+      const point = { lat: event.latLng.lat(), lng: event.latLng.lng() };
+
+      if (normalizedSearchMode === "polygon") {
+        const nextPoints = [...draftSearchPolygonPointsRef.current, point];
+        draftSearchPolygonPointsRef.current = nextPoints;
+        setHasSearchDraft(true);
+        setDraftPolygonPointCount(nextPoints.length);
+
+        const polygon =
+          draftSearchOverlayRef.current &&
+          typeof (draftSearchOverlayRef.current as google.maps.Polygon).getPath ===
+            "function"
+            ? (draftSearchOverlayRef.current as google.maps.Polygon)
+            : new google.maps.Polygon({
+                map,
+                paths: nextPoints,
+                clickable: false,
+                fillColor: "#2563eb",
+                fillOpacity: 0.18,
+                strokeColor: "#2563eb",
+                strokeWeight: 2,
+              });
+
+        polygon.setPaths(nextPoints);
+        polygon.setOptions({
+          clickable: false,
+          draggable: false,
+          editable: false,
+          fillColor: "#2563eb",
+          fillOpacity: 0.18,
+          strokeColor: "#2563eb",
+          strokeWeight: 2,
+        });
+        draftSearchOverlayRef.current = polygon;
+        return;
+      }
+
+      if (normalizedSearchMode === "rectangle") {
+        if (!draftSearchAnchorRef.current) {
+          draftSearchAnchorRef.current = point;
+          setHasSearchDraft(true);
+          const rectangle = new google.maps.Rectangle({
+            map,
+            bounds: createBoundsFromPoints(point, point),
+            clickable: false,
+            fillColor: "#2563eb",
+            fillOpacity: 0.18,
+            strokeColor: "#2563eb",
+            strokeWeight: 2,
+          });
+          draftSearchOverlayRef.current = rectangle;
+          return;
+        }
+
+        const bounds = createBoundsFromPoints(draftSearchAnchorRef.current, point);
+        const rectangle =
+          draftSearchOverlayRef.current &&
+          typeof (draftSearchOverlayRef.current as google.maps.Rectangle).getBounds ===
+            "function"
+            ? (draftSearchOverlayRef.current as google.maps.Rectangle)
+            : new google.maps.Rectangle({
+                map,
+                bounds,
+                clickable: false,
+                fillColor: "#2563eb",
+                fillOpacity: 0.18,
+                strokeColor: "#2563eb",
+                strokeWeight: 2,
+              });
+
+        rectangle.setBounds(bounds);
+        finalizeCompletedSearchShape(rectangle, "rectangle");
+        return;
+      }
+
+      if (normalizedSearchMode === "circle") {
+        if (!draftSearchAnchorRef.current) {
+          draftSearchAnchorRef.current = point;
+          setHasSearchDraft(true);
+          const circle = new google.maps.Circle({
+            map,
+            center: point,
+            radius: 0,
+            clickable: false,
+            fillColor: "#2563eb",
+            fillOpacity: 0.18,
+            strokeColor: "#2563eb",
+            strokeWeight: 2,
+          });
+          draftSearchOverlayRef.current = circle;
+          return;
+        }
+
+        const center = draftSearchAnchorRef.current;
+        const radius = google.maps.geometry.spherical.computeDistanceBetween(
+          new google.maps.LatLng(center),
+          event.latLng,
+        );
+
+        if (radius <= 0) return;
+
+        const circle =
+          draftSearchOverlayRef.current &&
+          typeof (draftSearchOverlayRef.current as google.maps.Circle).getRadius ===
+            "function"
+            ? (draftSearchOverlayRef.current as google.maps.Circle)
+            : new google.maps.Circle({
+                map,
+                center,
+                radius,
+                clickable: false,
+                fillColor: "#2563eb",
+                fillOpacity: 0.18,
+                strokeColor: "#2563eb",
+                strokeWeight: 2,
+              });
+
+        circle.setCenter(center);
+        circle.setRadius(radius);
+        finalizeCompletedSearchShape(circle, "circle");
+      }
+    });
+
+    const mouseMoveListener = map.addListener(
+      "mousemove",
+      (event: google.maps.MapMouseEvent) => {
+        if (!event.latLng) return;
+
+        const point = { lat: event.latLng.lat(), lng: event.latLng.lng() };
+
+        if (
+          normalizedSearchMode === "polygon" &&
+          draftSearchPolygonPointsRef.current.length > 0
+        ) {
+          const polygon =
+            draftSearchOverlayRef.current &&
+            typeof (draftSearchOverlayRef.current as google.maps.Polygon).getPath ===
+              "function"
+              ? (draftSearchOverlayRef.current as google.maps.Polygon)
+              : new google.maps.Polygon({
+                  map,
+                  clickable: false,
+                  fillColor: "#2563eb",
+                  fillOpacity: 0.18,
+                  strokeColor: "#2563eb",
+                  strokeWeight: 2,
+                });
+
+          polygon.setPaths([...draftSearchPolygonPointsRef.current, point]);
+          draftSearchOverlayRef.current = polygon;
+          return;
+        }
+
+        if (normalizedSearchMode === "rectangle" && draftSearchAnchorRef.current) {
+          const rectangle =
+            draftSearchOverlayRef.current &&
+            typeof (draftSearchOverlayRef.current as google.maps.Rectangle).getBounds ===
+              "function"
+              ? (draftSearchOverlayRef.current as google.maps.Rectangle)
+              : new google.maps.Rectangle({
+                  map,
+                  clickable: false,
+                  fillColor: "#2563eb",
+                  fillOpacity: 0.18,
+                  strokeColor: "#2563eb",
+                  strokeWeight: 2,
+                });
+
+          rectangle.setBounds(createBoundsFromPoints(draftSearchAnchorRef.current, point));
+          draftSearchOverlayRef.current = rectangle;
+          return;
+        }
+
+        if (normalizedSearchMode === "circle" && draftSearchAnchorRef.current) {
+          const circle =
+            draftSearchOverlayRef.current &&
+            typeof (draftSearchOverlayRef.current as google.maps.Circle).getRadius ===
+              "function"
+              ? (draftSearchOverlayRef.current as google.maps.Circle)
+              : new google.maps.Circle({
+                  map,
+                  center: draftSearchAnchorRef.current,
+                  radius: 0,
+                  clickable: false,
+                  fillColor: "#2563eb",
+                  fillOpacity: 0.18,
+                  strokeColor: "#2563eb",
+                  strokeWeight: 2,
+                });
+
+          circle.setCenter(draftSearchAnchorRef.current);
+          circle.setRadius(
+            google.maps.geometry.spherical.computeDistanceBetween(
+              new google.maps.LatLng(draftSearchAnchorRef.current),
+              event.latLng,
+            ),
+          );
+          draftSearchOverlayRef.current = circle;
+        }
+      },
+    );
+
+    const doubleClickListener = map.addListener(
+      "dblclick",
+      (event: google.maps.MapMouseEvent) => {
+        if (normalizedSearchMode !== "polygon") return;
+        if (!event.latLng) return;
+        if (draftSearchPolygonPointsRef.current.length < 3) return;
+
+        event.stop();
+
+        const points = draftSearchPolygonPointsRef.current;
+        const lastPoint = points[points.length - 1];
+        const previousPoint = points[points.length - 2];
+        if (
+          lastPoint &&
+          previousPoint &&
+          Math.abs(lastPoint.lat - previousPoint.lat) < 0.0000001 &&
+          Math.abs(lastPoint.lng - previousPoint.lng) < 0.0000001
+        ) {
+          const dedupedPoints = points.slice(0, -1);
+          draftSearchPolygonPointsRef.current = dedupedPoints;
+          setDraftPolygonPointCount(dedupedPoints.length);
+
+          const polygon =
+            draftSearchOverlayRef.current &&
+            typeof (draftSearchOverlayRef.current as google.maps.Polygon).getPath ===
+              "function"
+              ? (draftSearchOverlayRef.current as google.maps.Polygon)
+              : null;
+
+          polygon?.setPaths(dedupedPoints);
+        }
+
+        completePolygonSearchDraft();
+      },
     );
 
     return () => {
-      drawingManagerRef.current?.setMap(null);
+      google.maps.event.removeListener(clickListener);
+      google.maps.event.removeListener(mouseMoveListener);
+      google.maps.event.removeListener(doubleClickListener);
+      map.setOptions({ disableDoubleClickZoom: false });
+      clearSearchDraftOverlay();
     };
   }, [
-    attachSearchShapeListeners,
-    clearSearchShape,
-    getDrawingModeForSearch,
+    clearSearchDraftOverlay,
+    completePolygonSearchDraft,
+    drawnSearchShape,
+    finalizeCompletedSearchShape,
     map,
     normalizedSearchMode,
-    styleSearchShape,
-    updateSearchResultFromShape,
   ]);
 
   useEffect(() => {
@@ -819,12 +1110,61 @@ export default function PropertyLocationsMap({
     if (searchResetToken === lastSearchResetTokenRef.current) return;
     lastSearchResetTokenRef.current = searchResetToken;
     clearSearchShape(false);
-    if (drawingManagerRef.current) {
-      drawingManagerRef.current.setDrawingMode(
-        getDrawingModeForSearch(normalizedSearchMode),
-      );
-    }
-  }, [clearSearchShape, getDrawingModeForSearch, normalizedSearchMode, searchResetToken]);
+  }, [clearSearchShape, searchResetToken]);
+
+  useEffect(() => {
+    if (!map) return;
+    map.data.revertStyle();
+  }, [map, normalizedSearchMode]);
+
+  useEffect(() => {
+    if (normalizedSearchMode !== "polygon") return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (event.key === "Enter" && draftSearchPolygonPointsRef.current.length >= 3) {
+        event.preventDefault();
+        completePolygonSearchDraft();
+        return;
+      }
+
+      if (
+        (event.key === "Backspace" ||
+          event.key === "Delete" ||
+          ((event.ctrlKey || event.metaKey) &&
+            event.key.toLowerCase() === "z")) &&
+        draftSearchPolygonPointsRef.current.length > 0
+      ) {
+        event.preventDefault();
+        undoPolygonSearchPoint();
+        return;
+      }
+
+      if (event.key === "Escape" && hasSearchDraft) {
+        event.preventDefault();
+        clearSearchDraftOverlay();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    clearSearchDraftOverlay,
+    completePolygonSearchDraft,
+    hasSearchDraft,
+    normalizedSearchMode,
+    undoPolygonSearchPoint,
+  ]);
 
   useEffect(() => {
     if (!hoveredProperty) return;
@@ -874,10 +1214,10 @@ export default function PropertyLocationsMap({
         fillOpacity: type === "province" ? 0.15 : 0.35,
         strokeWeight: 2,
         strokeColor: stroke,
-        clickable: true,
+        clickable: normalizedSearchMode === "none",
       });
     }
-  }, [map, showGISLayers]);
+  }, [map, normalizedSearchMode, showGISLayers]);
 
   const handleMapReady = useCallback((mapInstance: google.maps.Map) => {
     setMap(mapInstance);
@@ -1052,10 +1392,11 @@ useEffect(() => {
         map,
         title: `${property.propertyName} (${layer})`,
         content: pin,
-        gmpClickable: true,
+        gmpClickable: normalizedSearchModeRef.current === "none",
         zIndex: MARKER_LAYER_Z_INDEX[layer],
       });
       const handleMarkerClick: EventListener = () => {
+        if (normalizedSearchModeRef.current !== "none") return;
         if (activeInfoWindowRef.current) {
           activeInfoWindowRef.current.close();
         }
@@ -1074,9 +1415,16 @@ useEffect(() => {
         infoWindow.open({ map, anchor: marker });
         activeInfoWindowRef.current = infoWindow;
       };
-      marker.addListener("mouseover", () => setHoveredProperty(property));
-      marker.addListener("mouseout", () => setHoveredProperty(null));
       marker.addListener("mouseover", () => {
+        if (normalizedSearchModeRef.current !== "none") return;
+        setHoveredProperty(property);
+      });
+      marker.addListener("mouseout", () => {
+        if (normalizedSearchModeRef.current !== "none") return;
+        setHoveredProperty(null);
+      });
+      marker.addListener("mouseover", () => {
+        if (normalizedSearchModeRef.current !== "none") return;
         const hoverPin = getAdvancedMarkerPin(property.status, 1.15, {
           hasValuation: property.hasValuation,
           hasIndicativeValuation: property.hasIndicativeValuation,
@@ -1086,6 +1434,7 @@ useEffect(() => {
         marker.content = hoverPin;
       });
       marker.addListener("mouseout", () => {
+        if (normalizedSearchModeRef.current !== "none") return;
         const normalPin = getAdvancedMarkerPin(property.status, 1, {
           hasValuation: property.hasValuation,
           hasIndicativeValuation: property.hasIndicativeValuation,
@@ -1118,6 +1467,26 @@ useEffect(() => {
     }
     fitMapToBounds(map, newMarkers);
   }, [map, markerEntries, displayedProperties, enableClustering, locale, googleMapsApiKey]);
+
+  useEffect(() => {
+    markers.forEach((marker) => {
+      marker.gmpClickable = normalizedSearchMode === "none";
+    });
+
+    if (markerClusterer) {
+      markerClusterer.setMap(normalizedSearchMode === "none" ? map : null);
+    }
+
+    if (normalizedSearchMode !== "none") {
+      activeInfoWindowRef.current?.close();
+    }
+  }, [map, markerClusterer, markers, normalizedSearchMode]);
+
+  useEffect(() => {
+    if (normalizedSearchMode !== "none" && hoveredProperty) {
+      setHoveredProperty(null);
+    }
+  }, [hoveredProperty, normalizedSearchMode]);
 
   // Listen for property marker click events from info window
   useEffect(() => {
@@ -1234,33 +1603,35 @@ useEffect(() => {
               strokeColor: property.status === 'active' ? '#059669' :
                           property.status === 'pending' ? '#d97706' : '#4b5563',
               strokeWeight: isHovered ? 3 : 2,
-              clickable: true,
+              clickable: normalizedSearchMode === "none",
               zIndex: isHovered ? 10 : 1,
             });
 
-            polygon.addListener('click', () => {
-              if (onPropertyClick) {
-                onPropertyClick(property.propertyId);
-              }
-            });
-
-            polygon.addListener('mouseover', () => {
-              polygon.setOptions({
-                fillOpacity: 0.5,
-                strokeWeight: 3,
-                zIndex: 10,
+            if (normalizedSearchMode === "none") {
+              polygon.addListener('click', () => {
+                if (onPropertyClick) {
+                  onPropertyClick(property.propertyId);
+                }
               });
-              setHoveredProperty(property);
-            });
 
-            polygon.addListener('mouseout', () => {
-              polygon.setOptions({
-                fillOpacity: 0.3,
-                strokeWeight: 2,
-                zIndex: 1,
+              polygon.addListener('mouseover', () => {
+                polygon.setOptions({
+                  fillOpacity: 0.5,
+                  strokeWeight: 3,
+                  zIndex: 10,
+                });
+                setHoveredProperty(property);
               });
-              setHoveredProperty(null);
-            });
+
+              polygon.addListener('mouseout', () => {
+                polygon.setOptions({
+                  fillOpacity: 0.3,
+                  strokeWeight: 2,
+                  zIndex: 1,
+                });
+                setHoveredProperty(null);
+              });
+            }
 
             newShapes.set(property.propertyId, polygon);
             visibleShapesCount++;
@@ -1280,7 +1651,15 @@ useEffect(() => {
 
     setPropertyShapes(newShapes);
     setShapesVisible(visibleShapesCount > 0);
-  }, [map, displayedProperties, currentZoom, onPropertyClick, alwaysShowShapes, hoveredProperty]);
+  }, [
+    map,
+    displayedProperties,
+    currentZoom,
+    onPropertyClick,
+    alwaysShowShapes,
+    hoveredProperty,
+    normalizedSearchMode,
+  ]);
 
   // Toggle Street View Layer
   const toggleStreetViewLayer = useCallback(() => {
@@ -1357,9 +1736,13 @@ useEffect(() => {
 
       {/* Map Container */}
       <div style={{ width: "100%", height: isFullscreen ? "100vh" : height }}>
-        <APIProvider apiKey={googleMapsApiKey} libraries={["geometry", "marker", "drawing"]}>
+        <APIProvider
+          key={mapProviderKey}
+          apiKey={googleMapsApiKey}
+          libraries={mapLibraries}
+        >
           <GoogleMap
-            mapId={googleMapsMapId || undefined}
+            mapId={effectiveMapId}
             defaultCenter={{ lat: 11.5564, lng: 104.9282 }}
             defaultZoom={12}
             mapTypeId={mapType}
@@ -1499,21 +1882,63 @@ useEffect(() => {
                     ? "Choose a shape to start drawing."
                     : drawnSearchShape
                       ? "Drag or edit the shape to update matching properties."
-                      : "Draw one shape on the map to filter properties inside it."}
+                      : normalizedSearchMode === "polygon"
+                        ? hasSearchDraft
+                          ? "Click more points, then double-click, press Enter, or use Finish polygon."
+                          : "Click on the map to add polygon points."
+                        : hasSearchDraft
+                          ? "Move the cursor and click again to finish the shape."
+                          : "Click once to start, move the cursor, then click again to finish."}
                 </p>
                 {drawnSearchShape && (
                   <p className="mt-1 text-[10px] text-blue-700 capitalize">
                     Active shape: {drawnSearchShape.type}
                   </p>
                 )}
+                {!drawnSearchShape &&
+                  normalizedSearchMode === "polygon" &&
+                  draftPolygonPointCount > 0 && (
+                    <p className="mt-1 text-[10px] text-blue-700">
+                      Polygon points: {draftPolygonPointCount}
+                    </p>
+                  )}
+                {!drawnSearchShape &&
+                  normalizedSearchMode === "polygon" &&
+                  hasSearchDraft && (
+                    <p className="mt-1 text-[10px] text-blue-700">
+                      Backspace/Delete or Ctrl/Cmd+Z removes the last point.
+                    </p>
+                  )}
               </div>
+
+              {normalizedSearchMode === "polygon" &&
+                !drawnSearchShape &&
+                draftPolygonPointCount >= 3 && (
+                  <button
+                    onClick={completePolygonSearchDraft}
+                    className="w-full rounded-xl border border-green-700 bg-green-600 px-3 py-2.5 text-xs font-semibold text-white"
+                  >
+                    Finish Polygon ({draftPolygonPointCount})
+                  </button>
+                )}
+
+              {normalizedSearchMode === "polygon" &&
+                !drawnSearchShape &&
+                draftPolygonPointCount > 0 && (
+                  <button
+                    onClick={undoPolygonSearchPoint}
+                    className="w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+                  >
+                    Undo Last Point
+                  </button>
+                )}
 
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleSearchClear}
-                  disabled={!drawnSearchShape}
+                  disabled={!drawnSearchShape && !hasSearchDraft}
                   className={`flex-1 px-3 py-2.5 rounded-xl border text-xs font-semibold transition-colors ${
-                    drawnSearchShape
+                    drawnSearchShape || hasSearchDraft
                       ? "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
                       : "border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed"
                   }`}
@@ -1522,9 +1947,15 @@ useEffect(() => {
                 </button>
                 <button
                   onClick={() => onSearchModeChange("none")}
-                  disabled={normalizedSearchMode === "none" && !drawnSearchShape}
+                  disabled={
+                    normalizedSearchMode === "none" &&
+                    !drawnSearchShape &&
+                    !hasSearchDraft
+                  }
                   className={`flex-1 px-3 py-2.5 rounded-xl border text-xs font-semibold transition-colors ${
-                    normalizedSearchMode !== "none" || drawnSearchShape
+                    normalizedSearchMode !== "none" ||
+                    drawnSearchShape ||
+                    hasSearchDraft
                       ? "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                       : "border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed"
                   }`}

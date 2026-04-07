@@ -200,17 +200,10 @@ export class PropertyController {
 		const files = req.files as FileField;
 
 		const userHierarchyLevel = Math.min(
-			...req.user!.roles.map((r) => r.hierarchyLevel)
-		);
+        ...req.user!.roles.map(r => r.hierarchyLevel)
+      );
 
-		const updated = await propertyService.updateProperty(
-			propertyId,
-			req.body,
-			files,
-			userId,
-			userHierarchyLevel,
-			req.user?.permissions ?? []
-		);
+		const updated = await propertyService.updateProperty(propertyId, req.body, files, userId, userHierarchyLevel);
 		return successResponse(res, 200, { property: updated }, "Property updated successfully");
 	}
 

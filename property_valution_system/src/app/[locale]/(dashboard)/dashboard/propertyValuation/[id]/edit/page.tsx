@@ -687,8 +687,6 @@ export default function EditPropertyValuationPage() {
     const communeId = getAddressEntityCode(p?.propertyAddress?.commune);
     const villageId = getAddressEntityCode(p?.propertyAddress?.village);
 
-    console.log("🏘️ Setting addressCodes:", { provinceId, districtId, communeId, villageId });
-
     setAddressCodes({
       provinceId,
       districtId,

@@ -911,11 +911,28 @@ export default function EditPropertyPage() {
       }
 
       if (centerLat !== null && centerLng !== null) {
+        console.log("📍 Auto-centering pin to NEW shape center:", { lat: centerLat, lng: centerLng });
         handleInputChange("latitude", centerLat.toString());
         handleInputChange("longitude", centerLng.toString());
       }
     }
   }, [shapes]);
+
+  // Debug effect for map coordinates
+  useEffect(() => {
+    if (formData.latitude && formData.longitude) {
+      console.log("🗺️ Map Coordinates in Form:", {
+        latitude: formData.latitude,
+        longitude: formData.longitude,
+        parsed: {
+          lat: parseFloat(formData.latitude),
+          lng: parseFloat(formData.longitude),
+        },
+        addressCodes,
+        hasPolygon: !!existingPolygon,
+      });
+    }
+  }, [formData.latitude, formData.longitude, addressCodes, existingPolygon]);
 
   useEffect(() => {
     if (property && !hasLoadedData.current) {
@@ -1014,6 +1031,10 @@ export default function EditPropertyPage() {
       // Direct Unit Entry (Residential/Commercial Buildings):
       // Units are in property.buildingUnits array without building parent
       else if (directBuildingUnits.length > 0) {
+        console.log(
+          "✅ Loading DIRECT UNITS (no building parent):",
+          directBuildingUnits.length
+        );
         // Create a single "virtual" building to hold all direct units
         buildingsData = [
           {
@@ -1180,9 +1201,15 @@ export default function EditPropertyPage() {
   }, [formData, addressCodes, photoPreview, resolvedAddressItems]);
 
   const selectedPropertyType = useMemo(() => {
-    return propertyTypes.find(
+    const selected = propertyTypes.find(
       (pt) => pt.propertyTypeId === parseInt(formData.propertyTypeId)
     );
+    console.log("🔍 Selected Property Type:", {
+      propertyTypeId: formData.propertyTypeId,
+      selected: selected?.propertyName,
+      buildingSubtypes: selected?.buildingSubtypes?.length || 0,
+    });
+    return selected;
   }, [formData.propertyTypeId, propertyTypes]);
 
   const availableSubtypes = useMemo(() => {
@@ -1193,10 +1220,11 @@ export default function EditPropertyPage() {
     return selectedPropertyType?.currentUses || [];
   }, [selectedPropertyType]);
 
-  const availableBuildingSubtypes = useMemo(
-    () => selectedPropertyType?.buildingSubtypes || [],
-    [selectedPropertyType]
-  );
+  const availableBuildingSubtypes = useMemo(() => {
+    const subtypes = selectedPropertyType?.buildingSubtypes || [];
+    console.log("🏗️ Available Building Subtypes:", subtypes.length, subtypes);
+    return subtypes;
+  }, [selectedPropertyType]);
 
   const availableUnitTypes = useMemo(() => {
     return getUnitTypeOptions(formData.propertyTypeId);
@@ -1243,7 +1271,11 @@ export default function EditPropertyPage() {
       });
     } else {
       // ✅ Store the actual File object
-      setPhotos((prev) => ({ ...prev, [field]: file }));
+      setPhotos((prev) => {
+        const updated = { ...prev, [field]: file };
+        console.log(`✅ Updated photos.${field}:`, file.name, file);
+        return updated;
+      });
 
       // Generate preview separately
       const reader = new FileReader();
@@ -1612,7 +1644,12 @@ export default function EditPropertyPage() {
       }
     }
 
-    setFormData((prev) => ({ ...prev, [field]: value }));
+    console.log("🔄 Input change:", field, "=", value);
+    setFormData((prev) => {
+      const updated = { ...prev, [field]: value };
+      console.log("📝 Updated formData:", updated);
+      return updated;
+    });
   };
 
   const addBuilding = () => {
@@ -1975,15 +2012,17 @@ export default function EditPropertyPage() {
         "currentUseId",
         String(Number(formData.currentUseId))
       );
-
-      // Business status (ACTIVE/INACTIVE/etc.) is separate from workflow status.
-      formDataToSend.append("status", formData.status);
-
-      // Only admins/managers can explicitly change workflow state from this form.
-      // For everyone else we omit the field and let backend workflow rules apply.
-      if (canSelectWorkflowStatus && formData.workflowStatus) {
-        formDataToSend.append("workflowStatus", formData.workflowStatus);
+      
+      // ===== Auto-convert REJECTED to DRAFT =====
+      // When editing a REJECTED property:
+      // - Don't send status field, let backend auto-convert REJECTED → DRAFT
+      // - Backend will handle the status transition automatically
+      // - This matches the propertyValuation edit page behavior
+      if (property?.status !== "REJECTED") {
+        formDataToSend.append("status", formData.status);
       }
+      // Note: For REJECTED properties, status field is intentionally omitted
+      // Backend logic: if (existing.status === REJECTED && !data.status) { newStatus = DRAFT }
 
       // ✅ IMPORTANT: Always send description to allow updates/clearing
       // Rejection reasons are pre-cleaned during form load
@@ -2085,6 +2124,7 @@ export default function EditPropertyPage() {
           totalPrice: parseFloat(formData.totalPrice),
         };
         formDataToSend.append("transaction", JSON.stringify(transaction));
+        console.log("📊 Transaction data:", transaction);
       }
 
       // ===== Add buildings if applicable =====
@@ -2220,37 +2260,57 @@ export default function EditPropertyPage() {
       }
 
       // ===== ✅ ADD PHOTO FILES =====
+      console.log("📸 Photo state:", {
+        frontSide: photos.frontSide?.name,
+        inside: photos.inside?.name,
+        leftSide: photos.leftSide?.name,
+        rightSide: photos.rightSide?.name,
+        opposite: photos.opposite?.name,
+        buildingImage: photos.buildingImage?.name,
+        coverPhoto: photos.coverPhoto?.name,
+        backSidePhoto: photos.backSidePhoto?.name,
+        gallery: photos.gallery.length,
+      });
 
       // Property photo
 
       if (photos.frontSide instanceof File) {
         formDataToSend.append("frontSide", photos.frontSide);
+        console.log("✅ Added frontSide:", photos.frontSide.name);
       }
       if (photos.inside instanceof File) {
         formDataToSend.append("inside", photos.inside);
+        console.log("✅ Added inside:", photos.inside.name);
       }
       if (photos.leftSide instanceof File) {
         formDataToSend.append("leftSide", photos.leftSide);
+        console.log("✅ Added leftSide:", photos.leftSide.name);
       }
       if (photos.rightSide instanceof File) {
         formDataToSend.append("rightSide", photos.rightSide);
+        console.log("✅ Added rightSide:", photos.rightSide.name);
       }
       if (photos.opposite instanceof File) {
         formDataToSend.append("opposite", photos.opposite);
+        console.log("✅ Added opposite:", photos.opposite.name);
       }
       if (photos.buildingImage instanceof File) {
         formDataToSend.append("buildingImage", photos.buildingImage);
+        console.log("✅ Added buildingImage:", photos.buildingImage.name);
       }
       if (photos.coverPhoto instanceof File) {
         formDataToSend.append("coverPhoto", photos.coverPhoto);
+        console.log("✅ Added coverPhoto:", photos.coverPhoto.name);
       }
       if (photos.backSidePhoto instanceof File) {
         formDataToSend.append("backSidePhoto", photos.backSidePhoto);
+        console.log("✅ Added backSidePhoto:", photos.backSidePhoto.name);
       }
       if (photos.gallery.length > 0) {
-        photos.gallery.forEach((file) => {
+        photos.gallery.forEach((file, index) => {
           if (file instanceof File) {
             formDataToSend.append("gallery", file);
+            console.log(`✅ Added gallery[${index}]:`, file.name);
           }
         });
       }
@@ -2260,6 +2320,7 @@ export default function EditPropertyPage() {
           buildingFiles.forEach((file) => {
             if (file instanceof File) {
               formDataToSend.append(`buildingImage${buildingIndex}`, file);
+              console.log(`✅ Added buildingImage${buildingIndex}:`, file.name);
             }
           });
         });
@@ -2281,10 +2342,19 @@ export default function EditPropertyPage() {
 
       // Send as a JSON string that the backend Controller can parse
       if (deletedImagesList.length > 0) {
+        console.log("🗑️ Sending deletedImages list:", deletedImagesList);
         formDataToSend.append(
           "deletedImages",
           JSON.stringify(deletedImagesList)
         );
+      }
+
+      for (let [key, value] of formDataToSend.entries()) {
+        if (value instanceof File) {
+          console.log(`  ${key}: [File] ${value.name} (${value.size} bytes)`);
+        } else {
+          console.log(`  ${key}:`, value);
+        }
       }
 
       // ✅ USE THE MUTATION HOOK (not direct axios call)
@@ -2292,6 +2362,8 @@ export default function EditPropertyPage() {
         id: propertyId,
         data: formDataToSend,
       });
+
+      console.log("✅ Property updated successfully");
       setSubmitSuccess(true);
 
       // clear deletion flags

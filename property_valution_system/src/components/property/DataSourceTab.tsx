@@ -16,6 +16,8 @@ interface DataSourceProps {
   formData: PropertyFormData;
   onInputChange: (field: string, value: any) => void;
   onReset: () => void;
+  fieldErrors?: Partial<Record<string, string>>;
+  onClearFieldError?: (field: string) => void;
   t: (key: string) => string;
   tc: (key: string) => string;
 }
@@ -24,6 +26,8 @@ export function DataSourceTab({
   formData,
   onInputChange,
   onReset,
+  fieldErrors,
+  onClearFieldError,
   t,
   tc,
 }: DataSourceProps) {
@@ -55,11 +59,15 @@ export function DataSourceTab({
                     </Label>
                     <Select
                       value={formData.sourceType}
-                      onValueChange={(value) =>
-                        onInputChange("sourceType", value)
-                      }
+                      onValueChange={(value) => {
+                        onInputChange("sourceType", value);
+                        onClearFieldError?.("sourceType");
+                      }}
                     >
-                      <SelectTrigger id="sourceType">
+                      <SelectTrigger
+                        id="sourceType"
+                        className={fieldErrors?.sourceType ? "border-destructive" : ""}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -70,6 +78,9 @@ export function DataSourceTab({
                         <SelectItem value="OTHER">Other</SelectItem>
                       </SelectContent>
                     </Select>
+                    {fieldErrors?.sourceType ? (
+                      <p className="text-sm text-destructive">{fieldErrors.sourceType}</p>
+                    ) : null}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="contactName">{t("contactName")}</Label>
@@ -90,10 +101,15 @@ export function DataSourceTab({
                       id="phoneNumber"
                       placeholder={t("enterPhoneNumber")}
                       value={formData.phoneNumber}
-                      onChange={(e) =>
-                        onInputChange("phoneNumber", e.target.value)
-                      }
+                      className={fieldErrors?.phoneNumber ? "border-destructive" : ""}
+                      onChange={(e) => {
+                        onInputChange("phoneNumber", e.target.value);
+                        onClearFieldError?.("phoneNumber");
+                      }}
                     />
+                    {fieldErrors?.phoneNumber ? (
+                      <p className="text-sm text-destructive">{fieldErrors.phoneNumber}</p>
+                    ) : null}
                   </div>
                 </div>
               </CardContent>

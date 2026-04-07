@@ -29,12 +29,14 @@ interface PropertyAddressFormProps {
   value: AddressValue;
   resolvedAddressItems?: ResolvedAddressHierarchyItems;
   onAddressChange?: (address: AddressValue) => void;
+  errorMessages?: Partial<Record<"provinceId" | "districtId" | "communeId" | "villageId", string>>;
 }
 
 export const PropertyAddressForm: React.FC<PropertyAddressFormProps> = ({
   value,
   resolvedAddressItems,
   onAddressChange,
+  errorMessages,
 }) => {
   const t = useTranslations("properties");
   const addressLocale = useAddressLocale();
@@ -272,7 +274,10 @@ export const PropertyAddressForm: React.FC<PropertyAddressFormProps> = ({
             onValueChange={handleProvinceChange}
             disabled={isLoadingProvinces}
           >
-            <SelectTrigger id="province">
+            <SelectTrigger
+              id="province"
+              className={errorMessages?.provinceId ? "border-destructive" : ""}
+            >
               {isLoadingProvinces ? (
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
@@ -292,6 +297,9 @@ export const PropertyAddressForm: React.FC<PropertyAddressFormProps> = ({
               ))}
             </SelectContent>
           </Select>
+          {errorMessages?.provinceId ? (
+            <p className="text-sm text-destructive">{errorMessages.provinceId}</p>
+          ) : null}
         </div>
 
         {/* District */}
@@ -305,7 +313,10 @@ export const PropertyAddressForm: React.FC<PropertyAddressFormProps> = ({
             onValueChange={handleDistrictChange}
             disabled={!selectedProvinceId || isLoadingDistricts}
           >
-            <SelectTrigger id="district">
+            <SelectTrigger
+              id="district"
+              className={errorMessages?.districtId ? "border-destructive" : ""}
+            >
               {isLoadingDistricts ? (
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin text-yellow-600" />
@@ -325,6 +336,9 @@ export const PropertyAddressForm: React.FC<PropertyAddressFormProps> = ({
               ))}
             </SelectContent>
           </Select>
+          {errorMessages?.districtId ? (
+            <p className="text-sm text-destructive">{errorMessages.districtId}</p>
+          ) : null}
         </div>
 
         {/* Commune */}
@@ -338,7 +352,10 @@ export const PropertyAddressForm: React.FC<PropertyAddressFormProps> = ({
             onValueChange={handleCommuneChange}
             disabled={!selectedDistrictId || isLoadingCommunes}
           >
-            <SelectTrigger id="commune">
+            <SelectTrigger
+              id="commune"
+              className={errorMessages?.communeId ? "border-destructive" : ""}
+            >
               {isLoadingCommunes ? (
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin text-purple-600" />
@@ -358,6 +375,9 @@ export const PropertyAddressForm: React.FC<PropertyAddressFormProps> = ({
               ))}
             </SelectContent>
           </Select>
+          {errorMessages?.communeId ? (
+            <p className="text-sm text-destructive">{errorMessages.communeId}</p>
+          ) : null}
         </div>
 
         {/* Village */}

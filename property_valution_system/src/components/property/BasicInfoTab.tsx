@@ -26,6 +26,8 @@ interface BasicInfoTabProps {
   canSelectStatus?: boolean;
   canSelectWorkflowStatus?: boolean;
   showWorkflowStatus?: boolean;
+  fieldErrors?: Partial<Record<string, string>>;
+  onClearFieldError?: (field: string) => void;
   t: (key: string) => string;
 }
 
@@ -37,6 +39,8 @@ export const BasicInfoTab: React.FC<BasicInfoTabProps> = ({
   canSelectStatus = false,
   canSelectWorkflowStatus = false,
   showWorkflowStatus = true,
+  fieldErrors,
+  onClearFieldError,
   t,
 }) => {
   // Get selected property type details
@@ -85,8 +89,14 @@ export const BasicInfoTab: React.FC<BasicInfoTabProps> = ({
               {t('propertyType')}
               <span className="text-red-500 text-lg">*</span>
             </Label>
-            <Select value={formData.propertyTypeId} onValueChange={(value) => onInputChange('propertyTypeId', value)}>
-              <SelectTrigger id="propertyTypeId" className="h-11 border-muted-foreground/20">
+            <Select value={formData.propertyTypeId} onValueChange={(value) => {
+              onInputChange('propertyTypeId', value);
+              onClearFieldError?.("propertyTypeId");
+            }}>
+              <SelectTrigger
+                id="propertyTypeId"
+                className={`h-11 border-muted-foreground/20 ${fieldErrors?.propertyTypeId ? "border-destructive" : ""}`}
+              >
                 <SelectValue placeholder={t('propertyTypePlaceholder')} />
               </SelectTrigger>
               <SelectContent>
@@ -103,6 +113,9 @@ export const BasicInfoTab: React.FC<BasicInfoTabProps> = ({
                 Please select a property type first
               </p>
             )}
+            {fieldErrors?.propertyTypeId ? (
+              <p className="text-sm text-destructive">{fieldErrors.propertyTypeId}</p>
+            ) : null}
           </div>
 
           <div className="space-y-2">
@@ -135,10 +148,16 @@ export const BasicInfoTab: React.FC<BasicInfoTabProps> = ({
             </Label>
             <Select
               value={formData.currentUseId}
-              onValueChange={(value) => onInputChange('currentUseId', value)}
+              onValueChange={(value) => {
+                onInputChange('currentUseId', value);
+                onClearFieldError?.("currentUseId");
+              }}
               disabled={!formData.propertyTypeId}
             >
-              <SelectTrigger id="currentUseId" className="h-11 border-muted-foreground/20 disabled:opacity-50">
+              <SelectTrigger
+                id="currentUseId"
+                className={`h-11 border-muted-foreground/20 disabled:opacity-50 ${fieldErrors?.currentUseId ? "border-destructive" : ""}`}
+              >
                 <SelectValue placeholder={formData.propertyTypeId ? 'Choose usage...' : 'Select type first'} />
               </SelectTrigger>
               <SelectContent>
@@ -149,6 +168,9 @@ export const BasicInfoTab: React.FC<BasicInfoTabProps> = ({
                 ))}
               </SelectContent>
             </Select>
+            {fieldErrors?.currentUseId ? (
+              <p className="text-sm text-destructive">{fieldErrors.currentUseId}</p>
+            ) : null}
           </div>
         </div>
 

@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm, type FieldErrors, type SubmitErrorHandler } from "react-hook-form";
+import { type FieldErrors, useForm } from "react-hook-form";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/lib/navigation";
 import {
@@ -105,10 +105,6 @@ const EMPTY_RESOLVED_ADDRESS_ITEMS: ResolvedAddressHierarchyItems = {
   village: null,
 };
 
-type FormTabKey = "introduction" | "property" | "valuation";
-
-type TranslationFn = (key: string, values?: Record<string, unknown>) => string;
-
 const pickFirstNonEmpty = (...values: Array<string | null | undefined>): string | null => {
   for (const value of values) {
     const trimmed = value?.trim();
@@ -117,22 +113,6 @@ const pickFirstNonEmpty = (...values: Array<string | null | undefined>): string 
 
   return null;
 };
-
-const hasNonEmptyString = (value?: string | null): boolean => Boolean(value?.trim());
-
-const optionalNumberInput = z.preprocess((value) => {
-  if (value === "" || value === null || value === undefined) return undefined;
-
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) return undefined;
-
-    const parsed = Number(trimmed);
-    return Number.isFinite(parsed) ? parsed : value;
-  }
-
-  return value;
-}, z.number().optional());
 
 // Validate date string format and value (must be before schema)
 const isValidDateString = (value?: string | Date): boolean => {
@@ -162,24 +142,44 @@ const isValidDateString = (value?: string | Date): boolean => {
 };
 
 const valuationFormSchema = propertyValuationBaseSchema.extend({
+  valuationNo: z.string().trim().min(1, "Valuation number is required"),
+  valuationMethod: z.string().trim().min(1, "Valuation method is required"),
+  dateOfInspection: z.string().trim().min(1, "Date of inspection is required"),
+  valuationDate: z.string().trim().min(1, "Valuation date is required"),
+  dateOfReport: z.string().trim().min(1, "Date of report is required"),
   valuationPdf: z.any().optional(),
   formattedAddress: z.string().optional(),
   placeId: z.string().optional(),
   geolocationLink: z.string().optional(),
   polygon: z.any().optional(),
+  marketValue: z
+    .number({
+      required_error: "Market value is required",
+      invalid_type_error: "Market value is required",
+    })
+    .nonnegative("Market value must be zero or greater"),
+  pricePerSqm: z
+    .number({
+      required_error: "Price per sqm is required",
+      invalid_type_error: "Price per sqm is required",
+    })
+    .nonnegative("Price per sqm must be zero or greater"),
   status: z.enum(PROPERTY_VALUATION_STATUS, {
     required_error: "Property valuation status is required",
   }),
   // property fields (flatten)
   propertyName: z.string().optional(),
-  propertyTypeId: z.number().optional(),
+  propertyTypeId: z.number({
+    required_error: "Property type is required",
+    invalid_type_error: "Property type is required",
+  }),
   propertySubtypeId: z.number().optional(),
   currentUseId: z.number().optional(),
   propertyStatus: z.string().optional(),
   description: z.string().optional(),
   inspectorName: z.string().optional(),
-  perposeOfValuation: z.string().optional(),
-  preparedFor: z.string().optional(),
+  preparedFor: z.string().trim().min(1, "Prepared For is required"),
+  purposeOfValuation: z.string().trim().min(1, "Purpose of valuation is required"),
   // address codes
   provinceId: z.string().optional(),
   districtId: z.string().optional(),
@@ -188,20 +188,31 @@ const valuationFormSchema = propertyValuationBaseSchema.extend({
   street: z.string().optional(),
   houseNo: z.string().optional(),
   // coords
-  latitude: optionalNumberInput,
-  longitude: optionalNumberInput,
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
   // title doc
-  titleDeedType: z.string().optional(),
-  titleDeedNo: z.string().optional(),
+  titleDeedType: z.string().trim().min(1, "Title deed type is required"),
+  titleDeedNo: z.string().trim().min(1, "Title deed number is required"),
   issuedYear: z.string().optional(),
   parcelNo: z.string().optional(),
-  totalSizeByTitleDeed: z.string().optional(),
+  totalSizeByTitleDeed: z
+    .string()
+    .trim()
+    .min(1, "Total size by title deed is required")
+    .refine((value) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) && numeric > 0;
+    }, "Total size by title deed must be a positive number"),
   // data source
   sourceType: z.string().optional(),
   contactName: z.string().optional(),
   phoneNumber: z.string().optional(),
   // workflow status (force allowed values)
-  workflowStatus: z.enum(WORKFLOW_STATUS).default("DRAFT").optional(),
+  workflowStatus: z
+    .enum(WORKFLOW_STATUS, {
+      required_error: "Workflow status is required",
+    })
+    .default("DRAFT"),
 }).superRefine((data, ctx) => {
   // Validate date fields
   const dateFields = [
@@ -236,91 +247,9 @@ const withForcedSaleValidation = <T extends z.ZodTypeAny>(schema: T) =>
 
 // Manual-only mode: require propertyTypeId
 const manualSchema = withForcedSaleValidation(
-  valuationFormSchema.superRefine((values, ctx) => {
-    if (typeof values.propertyTypeId !== "number") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Property type is required",
-        path: ["propertyTypeId"],
-      });
-    }
-
-    const requiredStringFields = [
-      {
-        value: values.provinceId,
-        message: "Province is required",
-        path: ["provinceId"] as const,
-      },
-      {
-        value: values.districtId,
-        message: "District is required",
-        path: ["districtId"] as const,
-      },
-      {
-        value: values.communeId,
-        message: "Commune is required",
-        path: ["communeId"] as const,
-      },
-      {
-        value: values.titleDeedType,
-        message: "Title deed type is required",
-        path: ["titleDeedType"] as const,
-      },
-      {
-        value: values.valuationMethod,
-        message: "Valuation method is required",
-        path: ["valuationMethod"] as const,
-      },
-      {
-        value: typeof values.dateOfInspection === "string" ? values.dateOfInspection : undefined,
-        message: "Date of inspection is required",
-        path: ["dateOfInspection"] as const,
-      },
-      {
-        value: typeof values.valuationDate === "string" ? values.valuationDate : undefined,
-        message: "Valuation date is required",
-        path: ["valuationDate"] as const,
-      },
-      {
-        value: typeof values.dateOfReport === "string" ? values.dateOfReport : undefined,
-        message: "Date of report is required",
-        path: ["dateOfReport"] as const,
-      },
-    ];
-
-    requiredStringFields.forEach(({ value, message, path }) => {
-      if (!hasNonEmptyString(value)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message,
-          path,
-        });
-      }
-    });
-
-    if (typeof values.latitude !== "number" || !Number.isFinite(values.latitude)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Latitude is required",
-        path: ["latitude"],
-      });
-    }
-
-    if (typeof values.longitude !== "number" || !Number.isFinite(values.longitude)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Longitude is required",
-        path: ["longitude"],
-      });
-    }
-
-    if (typeof values.marketValue !== "number" || !Number.isFinite(values.marketValue)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Market value is required",
-        path: ["marketValue"],
-      });
-    }
+  valuationFormSchema.refine((values) => values.propertyTypeId !== undefined, {
+    message: "Property type is required",
+    path: ["propertyTypeId"],
   })
 );
 
@@ -333,153 +262,25 @@ type ConfirmDialogState = {
   onConfirm: () => void;
 };
 
-type FirstFormError = {
-  path: string;
-  message?: string;
-};
-
-const normalizeFormFieldPath = (path?: string | null): string | null => {
-  if (!path) return null;
-
-  const segments = path
-    .split(".")
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-
-  return segments.length > 0 ? segments[segments.length - 1] : null;
-};
-
-const getFirstFormError = (
-  errors: FieldErrors<ManualFormValues>,
-  parentPath = ""
-): FirstFormError | null => {
-  for (const [key, value] of Object.entries(errors)) {
-    if (!value || key === "root") continue;
-
-    const currentPath = parentPath ? `${parentPath}.${key}` : key;
-
-    if (Array.isArray(value)) {
-      for (let index = 0; index < value.length; index += 1) {
-        const nestedValue = value[index];
-        if (!nestedValue || typeof nestedValue !== "object") continue;
-
-        const nestedError = getFirstFormError(
-          nestedValue as FieldErrors<ManualFormValues>,
-          `${currentPath}.${index}`
-        );
-
-        if (nestedError) return nestedError;
-      }
-
-      continue;
-    }
-
-    if (typeof value !== "object") continue;
-
-    if ("message" in value || "type" in value) {
-      return {
-        path: currentPath,
-        message: typeof value.message === "string" ? value.message : undefined,
-      };
-    }
-
-    const nestedError = getFirstFormError(
-      value as FieldErrors<ManualFormValues>,
-      currentPath
-    );
-
-    if (nestedError) return nestedError;
-  }
-
-  return null;
-};
-
-const getTabForFieldPath = (path?: string | null): FormTabKey => {
-  const field = normalizeFormFieldPath(path);
-
-  if (field === "preparedFor" || field === "purposeOfValuation" || field === "note") {
-    return "introduction";
-  }
-
-  if (
-    field === "propertyName" ||
-    field === "propertyTypeId" ||
-    field === "propertySubtypeId" ||
-    field === "currentUseId" ||
-    field === "description" ||
-    field === "provinceId" ||
-    field === "districtId" ||
-    field === "communeId" ||
-    field === "villageId" ||
-    field === "street" ||
-    field === "houseNo" ||
-    field === "latitude" ||
-    field === "longitude" ||
-    field === "formattedAddress" ||
-    field === "placeId" ||
-    field === "geolocationLink" ||
-    field === "titleDeedType" ||
-    field === "titleDeedNo" ||
-    field === "issuedYear" ||
-    field === "parcelNo" ||
-    field === "totalSizeByTitleDeed" ||
-    field === "sourceType" ||
-    field === "contactName" ||
-    field === "phoneNumber"
-  ) {
-    return "property";
-  }
-
-  return "valuation";
-};
-
-const getFieldLabel = (
-  path: string | null,
-  t: TranslationFn,
-  tp: TranslationFn
-): string | null => {
-  const field = normalizeFormFieldPath(path);
-  if (!field) return null;
-
-  switch (field) {
-    case "preparedFor":
-      return t("prepareFor");
-    case "purposeOfValuation":
-      return t("purposeOfValuation");
-    case "note":
-      return t("note");
-    case "valuationMethod":
-      return t("valuationMethod");
-    case "dateOfInspection":
-      return t("dateOfInspection");
-    case "valuationDate":
-      return t("valuationDate");
-    case "dateOfReport":
-      return t("dateOfReport");
-    case "marketValue":
-      return t("marketValue");
-    case "propertyTypeId":
-      return tp("propertyType");
-    case "provinceId":
-      return tp("province");
-    case "districtId":
-      return tp("district");
-    case "communeId":
-      return tp("commune");
-    case "latitude":
-      return t("latitude");
-    case "longitude":
-      return t("longitude");
-    case "titleDeedType":
-      return tp("titleDeedType");
-    case "titleDeedNo":
-      return tp("titleDeedNo");
-    case "totalSizeByTitleDeed":
-      return tp("totalSizeByTitleDeed");
-    default:
-      return null;
-  }
-};
+const invalidFieldTabMap = {
+  preparedFor: "introduction",
+  purposeOfValuation: "introduction",
+  propertyTypeId: "property",
+  titleDeedType: "property",
+  titleDeedNo: "property",
+  totalSizeByTitleDeed: "property",
+  valuationNo: "valuation",
+  valuationMethod: "valuation",
+  dateOfInspection: "valuation",
+  valuationDate: "valuation",
+  dateOfReport: "valuation",
+  marketValue: "valuation",
+  pricePerSqm: "valuation",
+  workflowStatus: "valuation",
+  status: "valuation",
+} as const satisfies Partial<
+  Record<keyof ManualFormValues, "introduction" | "property" | "valuation">
+>;
 
 // ============================================
 // 🔧 UTILS
@@ -709,9 +510,8 @@ const applyApiErrorsToForm = (form: ReturnType<typeof useForm<ManualFormValues>>
       const p = (e.path ?? "").toString();
       const m = e.message ?? "Invalid value";
       toast.error(`${p ? `${p}: ` : ""}${m}`);
-      const normalizedPath = normalizeFormFieldPath(p);
-      if (normalizedPath) {
-        form.setError(normalizedPath as any, { type: "server", message: m });
+      if (p) {
+        form.setError(p as any, { type: "server", message: m });
       }
     });
   }
@@ -809,7 +609,7 @@ export default function AddPropertyValuationPage() {
   const canSelectStatus = hasHierarchyLevel(2);
 
   const [currentTab, setCurrentTab] = useState<
-    FormTabKey
+    "introduction" | "property" | "valuation"
   >("introduction");
 
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
@@ -820,22 +620,6 @@ export default function AddPropertyValuationPage() {
   });
 
   const isSubmitting = createMutation.isPending;
-
-  const focusTabForField = useCallback((path?: string | null) => {
-    if (!path) return;
-    setCurrentTab(getTabForFieldPath(path));
-  }, []);
-
-  const handleInvalidSubmit: SubmitErrorHandler<ManualFormValues> = useCallback(
-    (errors) => {
-      const firstError = getFirstFormError(errors);
-      focusTabForField(firstError?.path);
-
-      const fieldLabel = getFieldLabel(firstError?.path ?? null, t, tp);
-      toast.error(firstError?.message ?? (fieldLabel ? `${fieldLabel}: ${tc("required")}` : tc("required")));
-    },
-    [focusTabForField, t, tc, tp]
-  );
 
   const methodOptions = useMemo(
     () => [
@@ -915,6 +699,30 @@ export default function AddPropertyValuationPage() {
     defaultValues: defaults,
     mode: "onBlur",
   });
+
+  const handleInvalidSubmit = useCallback(
+    (errors: FieldErrors<ManualFormValues>) => {
+      const orderedInvalidFields = Object.keys(invalidFieldTabMap).filter(
+        (field) => Boolean(errors[field as keyof ManualFormValues])
+      ) as Array<keyof typeof invalidFieldTabMap>;
+
+      if (!orderedInvalidFields.length) {
+        toast.error("Please complete the required fields.");
+        return;
+      }
+
+      const messages = orderedInvalidFields
+        .map((field) => errors[field as keyof ManualFormValues]?.message)
+        .filter((message): message is string => typeof message === "string" && message.trim().length > 0);
+
+      [...new Set(messages)].slice(0, 5).forEach((message) => toast.error(message));
+
+      const firstField = orderedInvalidFields[0];
+      setCurrentTab(invalidFieldTabMap[firstField]);
+      form.setFocus(firstField as keyof ManualFormValues);
+    },
+    [form]
+  );
 
   // property-type dependent options
   const selectedPropertyTypeId = form.watch("propertyTypeId");
@@ -1628,14 +1436,12 @@ export default function AddPropertyValuationPage() {
   // submit
   const handleSubmit = useCallback(
     (values: ManualFormValues) => {
-      if (!values.propertyTypeId) return;
-
       const propertyPayload: CreatePropertyForValuationInput = {
         propertyTypeId: values.propertyTypeId,
         propertySubtypeId: values.propertySubtypeId,
         currentUseId: values.currentUseId,
         propertyName: trimValue(values.propertyName),
-        status: "ACTIVE",
+        status: trimValue(values.propertyStatus) ?? "ACTIVE",
         description: trimValue(values.description),
 
         propertyAddress: buildPropertyAddressInput(values),
@@ -1658,20 +1464,15 @@ export default function AddPropertyValuationPage() {
           router.push("/dashboard/propertyValuation");
         },
         onError: (err) => {
-          const apiPayload = getApiErrorPayload(err);
-          const firstApiPath = apiPayload?.errors?.find((error) => error.path)?.path ?? null;
-          if (firstApiPath) {
-            focusTabForField(firstApiPath);
-          }
           applyApiErrorsToForm(form, err);
           // fallback
-          if (!apiPayload) {
+          if (!getApiErrorPayload(err)) {
             toast.error(getErrorMessage(err, "Failed to create valuation"));
           }
         },
       });
     },
-    [createMutation, focusTabForField, form, polygonGeoJson, router, shapes, t]
+    [createMutation, form, polygonGeoJson, router, shapes, t]
   );
 
   const onSubmitClick = useCallback(() => {
@@ -1706,12 +1507,7 @@ export default function AddPropertyValuationPage() {
   ]);
 
   return (
-    <PermissionGuard
-      maxHierarchyLevel={3}
-      requiredPermissions={["property:read", "dashboard:read"]}
-      requireAllPermissions={false}
-      redirectTo="/dashboard"
-    >
+    <PermissionGuard maxHierarchyLevel={3} redirectTo="/dashboard">
       <div className="min-h-dvh bg-gradient-to-br from-background via-background to-muted/20">
         <PropertyPageHeader
           title={t("createTitle")}
@@ -1750,10 +1546,7 @@ export default function AddPropertyValuationPage() {
             </div>
 
             <Form {...form}>
-              <form
-                onSubmit={form.handleSubmit(handleSubmit, handleInvalidSubmit)}
-                className="space-y-6 mt-6"
-              >
+              <form onSubmit={form.handleSubmit(handleSubmit, handleInvalidSubmit)} className="space-y-6 mt-6">
                 <TabsContent value="introduction" className="space-y-6">
                   <Introduction
                     form={form}
@@ -1924,19 +1717,25 @@ function Introduction({
             name="preparedFor"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>{t("prepareFor")}</FormLabel>
+                <FormLabel>
+                  {t("prepareFor")}
+                  <span className="text-red-500"> *</span>
+                </FormLabel>
                 <Select
                   value={field.value?.trim() ? field.value : "__none"}
-                  onValueChange={(value) => field.onChange(value === "__none" ? "" : value)}
+                  onValueChange={(value) => {
+                    field.onChange(value === "__none" ? "" : value);
+                    form.clearErrors("preparedFor");
+                  }}
                   disabled={isSubmitting}
                 >
                   <FormControl>
                     <SelectTrigger className="h-11">
-                      <SelectValue placeholder="Select prepared for" />
+                      <SelectValue placeholder={t("preparedForPlaceholder")} />
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    <SelectItem value="__none">None</SelectItem>
+                    <SelectItem value="__none">{tc("none")}</SelectItem>
                     {PREPARED_FOR_OPTIONS.map((option) => (
                       <SelectItem key={option} value={option}>
                         {option}
@@ -1944,7 +1743,6 @@ function Introduction({
                     ))}
                   </SelectContent>
                 </Select>
-                <FormDescription>{tc("optional")}</FormDescription>
                 <FormMessage />
               </FormItem>
             )}
@@ -1954,10 +1752,16 @@ function Introduction({
             name="purposeOfValuation"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>{t("purposeOfValuation")}</FormLabel>
+                <FormLabel>
+                  {t("purposeOfValuation")}
+                  <span className="text-red-500"> *</span>
+                </FormLabel>
                 <Select
                   value={field.value?.trim() ? field.value : "__none"}
-                  onValueChange={(value) => field.onChange(value === "__none" ? "" : value)}
+                  onValueChange={(value) => {
+                    field.onChange(value === "__none" ? "" : value);
+                    form.clearErrors("purposeOfValuation");
+                  }}
                   disabled={isSubmitting}
                 >
                   <FormControl>
@@ -1976,7 +1780,6 @@ function Introduction({
                     )}
                   </SelectContent>
                 </Select>
-                <FormDescription>{tc("optional")}</FormDescription>
                 <FormMessage />
               </FormItem>
             )}
@@ -2449,7 +2252,7 @@ function ValuationDetailsSection({
             name="valuationNo"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>ValuationNo</FormLabel>
+                <FormLabel>ValuationNo<span className="text-red-500">*</span></FormLabel>
                 <FormControl>
                   <Input
                     placeholder={t("valuationNoPlaceholder")}
@@ -2459,7 +2262,6 @@ function ValuationDetailsSection({
                     className="h-11"
                   />
                 </FormControl>
-                <FormDescription>Leave blank to auto-generate.</FormDescription>
                 <FormMessage />
               </FormItem>
             )}
@@ -2638,7 +2440,7 @@ function ValuationDetailsSection({
                   <FormItem>
                     <FormLabel>
                       {t(name)}
-                      {name === "marketValue" && (
+                      {(name === "marketValue" || name === "pricePerSqm") && (
                         <span className="text-red-500"> *</span>
                       )}
                     </FormLabel>

@@ -30,8 +30,8 @@ const propertyAddressSchema = z.object({
 
 const propertyLocationSchema = z
   .object({
-    latitude: z.union([z.number(), z.string()]).transform(Number),
-    longitude: z.union([z.number(), z.string()]).transform(Number),
+    latitude: z.union([z.number(), z.string()]).transform(Number).optional(),
+    longitude: z.union([z.number(), z.string()]).transform(Number).optional(),
     googlePoint: z.string().optional(),
     geolocationLink: z.string().optional(),
     formattedAddress: z.string().optional(),
@@ -55,10 +55,10 @@ const dataSourceSchema = z.object({
 
 const titleDocumentSchema = z.object({
   titleDeedType: z.nativeEnum(TitleTypeEnum),
-  titleDeedNo: z.string().nullable(),
+  titleDeedNo: z.string().nullable().optional(),
   issuedYear: z.string().nullable().optional(),
   parcelNo: z.string().nullable().optional(),
-  totalSizeByTitleDeed: z.number().nullable(),
+  totalSizeByTitleDeed: z.number().nullable().optional(),
   coverPhotoUrl: z.string().optional(),
   backSidePhotoUrl: z.string().optional(),
 });
@@ -68,53 +68,70 @@ const createPropertyForValuationSchema = z.object({
   propertySubtypeId: z.number().int().positive().optional(),
   currentUseId: z.number().int().positive().optional(),
   propertyName: z.string().max(255).optional(),
-  status: z.nativeEnum(PropertyStatus),
+  status: z.nativeEnum(PropertyStatus).optional(),
   workflowStatus: z.nativeEnum(WorkflowStatus).optional(),
   description: z.string().optional(),
-  propertyAddress: propertyAddressSchema,
-  propertyLocation: propertyLocationSchema,
+  propertyAddress: propertyAddressSchema.optional(),
+  propertyLocation: propertyLocationSchema.optional(),
   dataSource: dataSourceSchema.optional(),
-  titleDocument: titleDocumentSchema,
+  titleDocument: titleDocumentSchema.optional(),
 });
 
 const basePropertyValuationSchema = z.object({
   propertyId: z.number().int().positive().optional(),
-  property: createPropertyForValuationSchema,
-  valuationNo: z.string().min(1).max(50).optional(),
+  property: createPropertyForValuationSchema.optional(),
+  valuationNo: z.string().trim().min(1).max(50),
   landValue: z.number().nonnegative().optional(),
   buildingValue: z.number().nonnegative().optional(),
   marketValue: z.number().nonnegative(),
   forcedSaleValue: z.number().nonnegative().optional(),
-  pricePerSqm: z.number().nonnegative().optional(),
+  pricePerSqm: z.number().nonnegative(),
   dateOfInspection: valuationDateSchema,
   valuationDate: valuationDateSchema,
   valuationMethod: z.nativeEnum(ValuationMethod),
   dateOfReport: valuationDateSchema,
-  preparedFor: z.string().max(255).optional(),
+  preparedFor: z.string().trim().min(1).max(255),
   currency: z.string().min(3).max(3).optional(),
   valuerId: z.number().int().positive().optional(),
   inspectorName: z.string().max(100).optional(),
   status: z.nativeEnum(PropertyValuationStatus),
   workflowStatus: z.nativeEnum(WorkflowStatus),
-  purposeOfValuation: z.string().max(500).optional(),
+  purposeOfValuation: z.string().trim().min(1).max(500),
   note: z.string().max(500).optional(),
   internalNotes: z.string().max(500).optional(),
 });
 
-export const createPropertyValuationSchema = basePropertyValuationSchema.superRefine(
-  (data, ctx) => {
+export const createPropertyValuationSchema = basePropertyValuationSchema
+  .refine(
+    (v) =>
+      v.marketValue === undefined ||
+      v.forcedSaleValue === undefined ||
+      v.forcedSaleValue <= v.marketValue,
+    {
+      path: ["forcedSaleValue"],
+      message: "Forced sale value cannot exceed market value",
+    }
+  )
+  .superRefine((data, ctx) => {
     const hasPropertyId = typeof data.propertyId === "number";
     const hasProperty = !!data.property;
 
-    if (hasPropertyId === hasProperty) {
+    if (!hasPropertyId && !hasProperty) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Provide either propertyId or property data",
         path: ["propertyId"],
       });
     }
-  }
-);
+
+    if (hasPropertyId && hasProperty) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide either propertyId or property data, not both",
+        path: ["propertyId"],
+      });
+    }
+  });
 
 export type CreatePropertyValuationDTO = z.infer<
   typeof createPropertyValuationSchema

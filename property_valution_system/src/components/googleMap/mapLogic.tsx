@@ -505,6 +505,8 @@ const DrawingToolsUI = React.memo(function DrawingToolsUI(props: {
   show: boolean;
   drawingMode: ShapeType;
   setDrawingMode: (m: ShapeType) => void;
+  currentPolygonPoints: number;
+  onCompletePolygon: () => void;
   canUndo: boolean;
   onUndo: () => void;
   shapeCount: number;
@@ -512,7 +514,19 @@ const DrawingToolsUI = React.memo(function DrawingToolsUI(props: {
   onRemove: (id: string) => void;
   onClearAll: () => void;
 }) {
-  const { show, drawingMode, setDrawingMode, canUndo, onUndo, shapeCount, shapes, onRemove, onClearAll } = props;
+  const {
+    show,
+    drawingMode,
+    setDrawingMode,
+    currentPolygonPoints,
+    onCompletePolygon,
+    canUndo,
+    onUndo,
+    shapeCount,
+    shapes,
+    onRemove,
+    onClearAll,
+  } = props;
   if (!show) return null;
 
   const ToolBtn = ({ active, onClick, children }: any) => (
@@ -549,6 +563,23 @@ const DrawingToolsUI = React.memo(function DrawingToolsUI(props: {
               Circle
             </ToolBtn>
           </div>
+
+          {drawingMode && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] text-blue-900">
+              {drawingMode === "polygon"
+                ? "Click to add points, then press Enter or Finish to complete."
+                : "Click once to start, move the mouse, then click again to finish."}
+            </div>
+          )}
+
+          {drawingMode === "polygon" && currentPolygonPoints >= 3 && (
+            <button
+              onClick={onCompletePolygon}
+              className="w-full rounded-lg border border-green-700 bg-green-600 px-3 py-2 text-xs font-semibold text-white"
+            >
+              Finish polygon ({currentPolygonPoints})
+            </button>
+          )}
 
           {canUndo && (
             <button onClick={onUndo} className="w-full px-3 py-2 rounded-lg border border-purple-200 bg-purple-50 text-purple-700 text-xs font-semibold flex items-center justify-center gap-2">
@@ -601,7 +632,6 @@ export const MapLogic = ({
   onShapesChange,
   existingPolygon,
   disableBoundaryPinUpdate,
-  mapId,
   overlayRootId,
   isFullscreen,
   toggleFullscreen,
@@ -620,7 +650,6 @@ export const MapLogic = ({
   onShapesChange?: (shapes: DrawnShape[]) => void;
   existingPolygon?: { type: string; coordinates: number[][][] };
   disableBoundaryPinUpdate: boolean;
-  mapId?: string;
   overlayRootId: string;
   isFullscreen: boolean;
   toggleFullscreen: () => void;
@@ -680,12 +709,6 @@ export const MapLogic = ({
         map.setZoom(16);
       }
 
-      if (legacyMarkerRef.current) {
-        legacyMarkerRef.current.setPosition({
-          lat: initialCoords.latitude,
-          lng: initialCoords.longitude
-        });
-      }
     }
   }, [
     addressCodes.communeId,
@@ -721,9 +744,6 @@ export const MapLogic = ({
   // Street view
   const streetViewLayerRef = useRef<google.maps.StreetViewCoverageLayer | null>(null);
   const streetViewServiceRef = useRef<google.maps.StreetViewService | null>(null);
-
-  // Marker fallback (if no mapId)
-  const legacyMarkerRef = useRef<google.maps.Marker | null>(null);
 
   // Portal target
   const [overlayEl, setOverlayEl] = useState<HTMLElement | null>(null);
@@ -761,7 +781,12 @@ export const MapLogic = ({
   const [shapeMetas, setShapeMetas] = useState<{ id: string; type: "polygon" | "rectangle" | "circle" }[]>([]);
   const shapeMetasRef = useLatestRef(shapeMetas);
   const [shapeHistory, setShapeHistory] = useState<SerializedShape[][]>([]);
-  const drawingManagerRef = useRef<google.maps.drawing.DrawingManager | null>(null);
+  const [draftPolygonPointCount, setDraftPolygonPointCount] = useState(0);
+  const draftOverlayRef = useRef<
+    google.maps.Polygon | google.maps.Rectangle | google.maps.Circle | null
+  >(null);
+  const draftAnchorRef = useRef<google.maps.LatLngLiteral | null>(null);
+  const draftPolygonPointsRef = useRef<google.maps.LatLngLiteral[]>([]);
   const [isPinInsideShape, setIsPinInsideShape] = useState<boolean | null>(null);
 
   const userManuallyPlacedPin = useRef(false);
@@ -810,8 +835,7 @@ export const MapLogic = ({
       mapTypeControl: false,
       zoomControl: false,
       fullscreenControl: false,
-      draggableCursor: drawingModeRef.current ? "crosshair" : "default",
-      styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }],
+      draggableCursor: drawingMode ? "crosshair" : "default",
     });
 
     const sv = map.getStreetView();
@@ -833,18 +857,19 @@ export const MapLogic = ({
       const pos = sv.getPosition();
       if (!pos) return;
       handleManualLocationUpdateRef.current(pos.lat(), pos.lng(), true);
-      legacyMarkerRef.current?.setPosition(pos);
     });
 
     return () => {
       google.maps.event.removeListener(visibleListener);
       google.maps.event.removeListener(svPosListener);
     };
-  }, [map, currentMapType, showStreetViewLayer, drawingModeRef, handleManualLocationUpdateRef]);
+  }, [map, currentMapType, showStreetViewLayer, drawingMode, handleManualLocationUpdateRef]);
 
   /** ---------------- Global GIS style (zIndex fix) ---------------- **/
   useEffect(() => {
     if (!map) return;
+
+    const isDrawingInteractionEnabled = enableShapeDrawing && drawingMode !== null;
 
     map.data.setStyle((feature) => {
       const layerType = feature.getProperty("layerType") as GisLayerType | undefined;
@@ -859,49 +884,19 @@ export const MapLogic = ({
         strokeColor: base.stroke,
         strokeOpacity: isSat ? 0.98 : 0.85,
         strokeWeight: isSat ? 4 : 3,
-        clickable: !(enableShapeDrawingRef.current && drawingModeRef.current),
+        clickable: !isDrawingInteractionEnabled,
         zIndex: layerType ? (LAYER_Z[layerType] ?? 10) : 10, // ✅ commune/village above province
       };
     });
+
+    map.data.revertStyle();
 
     const idListener = map.addListener("maptypeid_changed", () => {
       map.data.revertStyle();
     });
 
     return () => google.maps.event.removeListener(idListener);
-  }, [map, enableShapeDrawingRef, drawingModeRef]);
-
-  /** ---------------- Marker fallback (no mapId) ---------------- **/
-  useEffect(() => {
-    if (!map) return;
-    if (mapId) return;
-    if (!window.google?.maps) return;
-
-    if (!legacyMarkerRef.current) {
-      legacyMarkerRef.current = new google.maps.Marker({
-        map,
-        position: markerPos,
-        draggable: true,
-        animation: google.maps.Animation.DROP,
-      });
-
-      legacyMarkerRef.current.addListener("dragend", () => {
-        const pos = legacyMarkerRef.current?.getPosition();
-        if (!pos) return;
-        ignoreReverseGeocode.current = false;
-        handleManualLocationUpdateRef.current(pos.lat(), pos.lng(), true);
-      });
-    } else {
-      legacyMarkerRef.current.setPosition(markerPos);
-    }
-  }, [map, mapId, markerPos, handleManualLocationUpdateRef]);
-
-  useEffect(() => {
-    return () => {
-      legacyMarkerRef.current?.setMap(null);
-      legacyMarkerRef.current = null;
-    };
-  }, []);
+  }, [map, enableShapeDrawing, drawingMode]);
 
   /** ---------------- GIS layer rendering (with parent ids) ---------------- **/
   const layerSigRef = useRef<Record<string, string>>({});
@@ -1007,7 +1002,6 @@ const renderLayer = useCallback(
       if (!userManuallyPlacedPin.current && !disableBoundaryPinUpdateRef.current) {
         const center = bounds.getCenter();
         handleManualLocationUpdateRef.current(center.lat(), center.lng(), false, false);
-        legacyMarkerRef.current?.setPosition(center);
       }
 
       return true;
@@ -1296,7 +1290,6 @@ const renderLayer = useCallback(
           if (!disableBoundaryPinUpdateRef.current) {
             const center = bounds.getCenter();
             handleManualLocationUpdateRef.current(center.lat(), center.lng(), false, false);
-            legacyMarkerRef.current?.setPosition(center);
           }
         }
       }
@@ -1314,7 +1307,6 @@ const renderLayer = useCallback(
       const lng = event.latLng.lng();
 
       handleManualLocationUpdateRef.current(lat, lng, true);
-      legacyMarkerRef.current?.setPosition(event.latLng);
 
       if (geocodingTimeoutRef.current) clearTimeout(geocodingTimeoutRef.current);
 
@@ -1420,7 +1412,7 @@ const renderLayer = useCallback(
     }
   }, [map, showStreetViewLayer]);
 
-  /** ---------------- DrawingManager (works if you load "drawing" library) ---------------- **/
+  /** ---------------- Custom shape drawing (no deprecated drawing library) ---------------- **/
   const shapeIdCounterRef = useRef(0);
   const getNextShapeId = useCallback((prefix: string) => {
     shapeIdCounterRef.current += 1;
@@ -1433,6 +1425,14 @@ const renderLayer = useCallback(
       ls.forEach((l) => google.maps.event.removeListener(l));
     } catch {}
     overlay?.setMap?.(null);
+  }, []);
+
+  const clearDraftOverlay = useCallback(() => {
+    draftOverlayRef.current?.setMap(null);
+    draftOverlayRef.current = null;
+    draftAnchorRef.current = null;
+    draftPolygonPointsRef.current = [];
+    setDraftPolygonPointCount(0);
   }, []);
 
   const emitShapesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -1640,92 +1640,359 @@ const renderLayer = useCallback(
     [emitShapes]
   );
 
+  const getOverlayCenter = useCallback(
+    (overlay: google.maps.MVCObject, type: "polygon" | "rectangle" | "circle") => {
+      if (type === "polygon") {
+        const path = (overlay as google.maps.Polygon).getPath?.();
+        if (!path?.getLength()) return null;
+
+        const bounds = new google.maps.LatLngBounds();
+        for (let i = 0; i < path.getLength(); i += 1) {
+          bounds.extend(path.getAt(i));
+        }
+        return bounds.getCenter();
+      }
+
+      if (type === "rectangle") {
+        return (overlay as google.maps.Rectangle).getBounds?.()?.getCenter() ?? null;
+      }
+
+      return (overlay as google.maps.Circle).getCenter?.() ?? null;
+    },
+    []
+  );
+
+  const pushShapeHistory = useCallback(() => {
+    setShapeHistory((history) => [...history, serializeCurrentShapes()]);
+  }, [serializeCurrentShapes]);
+
+  const finalizeCompletedShape = useCallback(
+    (
+      type: "polygon" | "rectangle" | "circle",
+      overlay: google.maps.Polygon | google.maps.Rectangle | google.maps.Circle
+    ) => {
+      pushShapeHistory();
+
+      const id = getNextShapeId(type);
+      overlaysRef.current.set(id, overlay);
+      setShapeMetas((prev) => [...prev, { id, type }]);
+      setDrawingMode(null);
+
+      setGMOverlayEditableAndTrack(overlay, type);
+
+      const center = getOverlayCenter(overlay, type);
+      if (center) {
+        userManuallyPlacedPin.current = false;
+        handleManualLocationUpdateRef.current(center.lat(), center.lng(), false);
+      }
+
+      clearDraftOverlay();
+      emitShapes();
+      showNotification(`${type} added ✓`, "success");
+    },
+    [
+      clearDraftOverlay,
+      emitShapes,
+      getNextShapeId,
+      getOverlayCenter,
+      pushShapeHistory,
+      setGMOverlayEditableAndTrack,
+      showNotification,
+      handleManualLocationUpdateRef,
+    ]
+  );
+
+  const completePolygonDraft = useCallback(() => {
+    if (!map) return;
+
+    const points = draftPolygonPointsRef.current;
+    if (points.length < 3) {
+      showNotification("Add at least 3 points to complete the polygon", "info");
+      return;
+    }
+
+    const draftPolygon = draftOverlayRef.current as google.maps.Polygon | null;
+    const polygon =
+      draftPolygon && typeof draftPolygon.getPath === "function"
+        ? draftPolygon
+        : new google.maps.Polygon({
+            map,
+            paths: points,
+            fillColor: "#3b82f6",
+            fillOpacity: 0.35,
+            strokeColor: "#2563eb",
+            strokeWeight: 2,
+          });
+
+    polygon.setPaths(points);
+    polygon.setOptions({
+      clickable: true,
+      draggable: true,
+      editable: true,
+      fillColor: "#3b82f6",
+      fillOpacity: 0.35,
+      strokeColor: "#2563eb",
+      strokeWeight: 2,
+    });
+
+    draftOverlayRef.current = null;
+    draftAnchorRef.current = null;
+    draftPolygonPointsRef.current = [];
+    finalizeCompletedShape("polygon", polygon);
+  }, [finalizeCompletedShape, map, showNotification]);
+
   useEffect(() => {
     if (!map) return;
 
-    if (!enableShapeDrawing) {
-      if (drawingManagerRef.current) {
-        drawingManagerRef.current.setMap(null);
-        drawingManagerRef.current = null;
+    if (!enableShapeDrawing || !drawingMode) {
+      clearDraftOverlay();
+      map.setOptions({ disableDoubleClickZoom: false });
+      return;
+    }
+
+    const createBoundsFromPoints = (
+      start: google.maps.LatLngLiteral,
+      end: google.maps.LatLngLiteral
+    ) =>
+      new google.maps.LatLngBounds(
+        {
+          lat: Math.min(start.lat, end.lat),
+          lng: Math.min(start.lng, end.lng),
+        },
+        {
+          lat: Math.max(start.lat, end.lat),
+          lng: Math.max(start.lng, end.lng),
+        }
+      );
+
+    map.setOptions({ disableDoubleClickZoom: drawingMode === "polygon" });
+
+    const clickListener = map.addListener("click", (event: google.maps.MapMouseEvent) => {
+      if (!event.latLng) return;
+
+      const point = { lat: event.latLng.lat(), lng: event.latLng.lng() };
+
+      if (drawingMode === "polygon") {
+        const nextPoints = [...draftPolygonPointsRef.current, point];
+        draftPolygonPointsRef.current = nextPoints;
+        setDraftPolygonPointCount(nextPoints.length);
+
+        const polygon =
+          draftOverlayRef.current && typeof (draftOverlayRef.current as google.maps.Polygon).getPath === "function"
+            ? (draftOverlayRef.current as google.maps.Polygon)
+            : new google.maps.Polygon({
+                map,
+                paths: nextPoints,
+                clickable: false,
+                fillColor: "#3b82f6",
+                fillOpacity: 0.18,
+                strokeColor: "#2563eb",
+                strokeWeight: 2,
+              });
+
+        polygon.setPaths(nextPoints);
+        polygon.setOptions({
+          clickable: false,
+          editable: false,
+          draggable: false,
+          fillColor: "#3b82f6",
+          fillOpacity: 0.18,
+          strokeColor: "#2563eb",
+          strokeWeight: 2,
+        });
+        draftOverlayRef.current = polygon;
+        return;
       }
-      return;
-    }
 
-    if (!window.google?.maps?.drawing) {
-      console.error("Google Maps Drawing library not loaded. Add 'drawing' to APIProvider libraries.");
-      return;
-    }
-
-    if (!drawingManagerRef.current) {
-      const dm = new google.maps.drawing.DrawingManager({
-        drawingControl: false,
-        drawingMode: null,
-        polygonOptions: { fillColor: "#3b82f6", fillOpacity: 0.35, strokeColor: "#2563eb", strokeWeight: 2, editable: true, draggable: true },
-        rectangleOptions: { fillColor: "#10b981", fillOpacity: 0.35, strokeColor: "#059669", strokeWeight: 2, editable: true, draggable: true },
-        circleOptions: { fillColor: "#f59e0b", fillOpacity: 0.35, strokeColor: "#d97706", strokeWeight: 2, editable: true, draggable: true },
-      });
-
-      dm.setMap(map);
-      drawingManagerRef.current = dm;
-
-      const pushHistory = () => setShapeHistory((h) => [...h, serializeCurrentShapes()]);
-
-      const onComplete = (type: "polygon" | "rectangle" | "circle") => (overlay: any) => {
-        pushHistory();
-
-        const id = getNextShapeId(type);
-        overlaysRef.current.set(id, overlay);
-        setShapeMetas((prev) => [...prev, { id, type }]);
-
-        setDrawingMode(null);
-        dm.setDrawingMode(null);
-
-        setGMOverlayEditableAndTrack(overlay, type);
-
-        // Auto-center pin to the newly drawn shape center.
-        let center: google.maps.LatLng | null = null;
-        if (type === "polygon") {
-          const path = (overlay as google.maps.Polygon).getPath?.();
-          if (path?.getLength()) {
-            const bounds = new google.maps.LatLngBounds();
-            for (let i = 0; i < path.getLength(); i += 1) {
-              bounds.extend(path.getAt(i));
-            }
-            center = bounds.getCenter();
-          }
-        } else if (type === "rectangle") {
-          center = (overlay as google.maps.Rectangle).getBounds?.()?.getCenter() ?? null;
-        } else if (type === "circle") {
-          center = (overlay as google.maps.Circle).getCenter?.() ?? null;
+      if (drawingMode === "rectangle") {
+        if (!draftAnchorRef.current) {
+          draftAnchorRef.current = point;
+          const rectangle = new google.maps.Rectangle({
+            map,
+            bounds: createBoundsFromPoints(point, point),
+            clickable: false,
+            fillColor: "#10b981",
+            fillOpacity: 0.18,
+            strokeColor: "#059669",
+            strokeWeight: 2,
+          });
+          draftOverlayRef.current = rectangle;
+          return;
         }
 
-        if (center) {
-          userManuallyPlacedPin.current = false;
-          handleManualLocationUpdateRef.current(center.lat(), center.lng(), false);
-          legacyMarkerRef.current?.setPosition(center);
+        const start = draftAnchorRef.current;
+        const bounds = createBoundsFromPoints(start, point);
+        const rectangle =
+          draftOverlayRef.current && typeof (draftOverlayRef.current as google.maps.Rectangle).getBounds === "function"
+            ? (draftOverlayRef.current as google.maps.Rectangle)
+            : new google.maps.Rectangle({
+                map,
+                bounds,
+                clickable: false,
+                fillColor: "#10b981",
+                fillOpacity: 0.18,
+                strokeColor: "#059669",
+                strokeWeight: 2,
+              });
+
+        rectangle.setBounds(bounds);
+        rectangle.setOptions({
+          clickable: true,
+          draggable: true,
+          editable: true,
+          fillColor: "#10b981",
+          fillOpacity: 0.35,
+          strokeColor: "#059669",
+          strokeWeight: 2,
+        });
+
+        draftOverlayRef.current = null;
+        draftAnchorRef.current = null;
+        finalizeCompletedShape("rectangle", rectangle);
+        return;
+      }
+
+      if (drawingMode === "circle") {
+        if (!draftAnchorRef.current) {
+          draftAnchorRef.current = point;
+          const circle = new google.maps.Circle({
+            map,
+            center: point,
+            radius: 0,
+            clickable: false,
+            fillColor: "#f59e0b",
+            fillOpacity: 0.18,
+            strokeColor: "#d97706",
+            strokeWeight: 2,
+          });
+          draftOverlayRef.current = circle;
+          return;
         }
 
-        emitShapes();
-        showNotification(`${type} added ✓`, "success");
-      };
+        const center = draftAnchorRef.current;
+        const radius = google.maps.geometry.spherical.computeDistanceBetween(
+          new google.maps.LatLng(center),
+          event.latLng
+        );
 
-      const polyListener = google.maps.event.addListener(dm, "polygoncomplete", (poly: google.maps.Polygon) => onComplete("polygon")(poly));
-      const rectListener = google.maps.event.addListener(dm, "rectanglecomplete", (rect: google.maps.Rectangle) => onComplete("rectangle")(rect));
-      const circleListener = google.maps.event.addListener(dm, "circlecomplete", (circle: google.maps.Circle) => onComplete("circle")(circle));
+        if (radius <= 0) {
+          showNotification("Move the cursor farther to create a circle", "info");
+          return;
+        }
 
-      (dm as any).__listeners = [polyListener, rectListener, circleListener];
-    }
-  }, [map, enableShapeDrawing, getNextShapeId, setGMOverlayEditableAndTrack, emitShapes, showNotification, serializeCurrentShapes]);
+        const circle =
+          draftOverlayRef.current && typeof (draftOverlayRef.current as google.maps.Circle).getRadius === "function"
+            ? (draftOverlayRef.current as google.maps.Circle)
+            : new google.maps.Circle({
+                map,
+                center,
+                radius,
+                clickable: false,
+                fillColor: "#f59e0b",
+                fillOpacity: 0.18,
+                strokeColor: "#d97706",
+                strokeWeight: 2,
+              });
 
-  useEffect(() => {
-    const dm = drawingManagerRef.current;
-    if (!dm || !enableShapeDrawing) return;
+        circle.setCenter(center);
+        circle.setRadius(radius);
+        circle.setOptions({
+          clickable: true,
+          draggable: true,
+          editable: true,
+          fillColor: "#f59e0b",
+          fillOpacity: 0.35,
+          strokeColor: "#d97706",
+          strokeWeight: 2,
+        });
 
-    if (!drawingMode) return dm.setDrawingMode(null);
-    if (drawingMode === "polygon") dm.setDrawingMode(google.maps.drawing.OverlayType.POLYGON);
-    if (drawingMode === "rectangle") dm.setDrawingMode(google.maps.drawing.OverlayType.RECTANGLE);
-    if (drawingMode === "circle") dm.setDrawingMode(google.maps.drawing.OverlayType.CIRCLE);
-  }, [drawingMode, enableShapeDrawing]);
+        draftOverlayRef.current = null;
+        draftAnchorRef.current = null;
+        finalizeCompletedShape("circle", circle);
+      }
+    });
+
+    const mouseMoveListener = map.addListener("mousemove", (event: google.maps.MapMouseEvent) => {
+      if (!event.latLng) return;
+
+      const point = { lat: event.latLng.lat(), lng: event.latLng.lng() };
+
+      if (drawingMode === "polygon" && draftPolygonPointsRef.current.length > 0) {
+        const polygon =
+          draftOverlayRef.current && typeof (draftOverlayRef.current as google.maps.Polygon).getPath === "function"
+            ? (draftOverlayRef.current as google.maps.Polygon)
+            : new google.maps.Polygon({
+                map,
+                clickable: false,
+                fillColor: "#3b82f6",
+                fillOpacity: 0.18,
+                strokeColor: "#2563eb",
+                strokeWeight: 2,
+              });
+
+        polygon.setPaths([...draftPolygonPointsRef.current, point]);
+        draftOverlayRef.current = polygon;
+        return;
+      }
+
+      if (drawingMode === "rectangle" && draftAnchorRef.current) {
+        const rectangle =
+          draftOverlayRef.current && typeof (draftOverlayRef.current as google.maps.Rectangle).getBounds === "function"
+            ? (draftOverlayRef.current as google.maps.Rectangle)
+            : new google.maps.Rectangle({
+                map,
+                clickable: false,
+                fillColor: "#10b981",
+                fillOpacity: 0.18,
+                strokeColor: "#059669",
+                strokeWeight: 2,
+              });
+
+        rectangle.setBounds(createBoundsFromPoints(draftAnchorRef.current, point));
+        draftOverlayRef.current = rectangle;
+        return;
+      }
+
+      if (drawingMode === "circle" && draftAnchorRef.current) {
+        const circle =
+          draftOverlayRef.current && typeof (draftOverlayRef.current as google.maps.Circle).getRadius === "function"
+            ? (draftOverlayRef.current as google.maps.Circle)
+            : new google.maps.Circle({
+                map,
+                center: draftAnchorRef.current,
+                radius: 0,
+                clickable: false,
+                fillColor: "#f59e0b",
+                fillOpacity: 0.18,
+                strokeColor: "#d97706",
+                strokeWeight: 2,
+              });
+
+        circle.setCenter(draftAnchorRef.current);
+        circle.setRadius(
+          google.maps.geometry.spherical.computeDistanceBetween(
+            new google.maps.LatLng(draftAnchorRef.current),
+            event.latLng
+          )
+        );
+        draftOverlayRef.current = circle;
+      }
+    });
+
+    return () => {
+      google.maps.event.removeListener(clickListener);
+      google.maps.event.removeListener(mouseMoveListener);
+      map.setOptions({ disableDoubleClickZoom: false });
+      clearDraftOverlay();
+    };
+  }, [
+    clearDraftOverlay,
+    drawingMode,
+    enableShapeDrawing,
+    finalizeCompletedShape,
+    map,
+    showNotification,
+  ]);
 
   const undoLastAction = useCallback(() => {
     setShapeHistory((history) => {
@@ -1743,13 +2010,14 @@ const renderLayer = useCallback(
 
   const clearAllShapes = useCallback(() => {
     setShapeHistory((h) => [...h, serializeCurrentShapes()]);
+    clearDraftOverlay();
     overlaysRef.current.forEach((ov) => removeOverlay(ov));
     overlaysRef.current.clear();
     setShapeMetas([]);
     emitShapes();
     setDrawingMode(null);
     showNotification("Cleared shapes", "info");
-  }, [removeOverlay, emitShapes, showNotification, serializeCurrentShapes]);
+  }, [clearDraftOverlay, removeOverlay, emitShapes, showNotification, serializeCurrentShapes]);
 
   const removeShape = useCallback(
     (id: string) => {
@@ -1774,15 +2042,19 @@ const renderLayer = useCallback(
         e.preventDefault();
         undoLastAction();
       }
+      if (e.key === "Enter" && drawingModeRef.current === "polygon") {
+        e.preventDefault();
+        completePolygonDraft();
+      }
       if (e.key === "Escape") {
+        clearDraftOverlay();
         setDrawingMode(null);
-        drawingManagerRef.current?.setDrawingMode(null);
       }
     };
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [enableShapeDrawing, undoLastAction]);
+  }, [clearDraftOverlay, completePolygonDraft, drawingModeRef, enableShapeDrawing, undoLastAction]);
 
   /** Existing polygon render (readonly overlay) **/
   useEffect(() => {
@@ -1837,7 +2109,6 @@ const renderLayer = useCallback(
 
       ignoreReverseGeocode.current = false;
       handleManualLocationUpdate(loc.lat(), loc.lng(), true);
-      legacyMarkerRef.current?.setPosition(loc);
 
       if (place.geometry?.viewport) map.fitBounds(place.geometry.viewport);
       else {
@@ -1902,7 +2173,7 @@ const renderLayer = useCallback(
 
   return (
     <>
-      {!!mapId && showMarker && <AdvancedMarker position={markerPos} draggable onDragEnd={onAdvancedDragEnd} />}
+      {showMarker && <AdvancedMarker position={markerPos} draggable onDragEnd={onAdvancedDragEnd} />}
 
       {overlayEl &&
         createPortal(
@@ -1922,6 +2193,8 @@ const renderLayer = useCallback(
               show={enableShapeDrawing && !isInStreetView}
               drawingMode={drawingMode}
               setDrawingMode={setDrawingMode}
+              currentPolygonPoints={draftPolygonPointCount}
+              onCompletePolygon={completePolygonDraft}
               canUndo={shapeHistory.length > 0}
               onUndo={undoLastAction}
               shapeCount={shapeMetas.length}
@@ -1957,11 +2230,6 @@ const renderLayer = useCallback(
 
             <ToastUI toast={toast} />
 
-            {process.env.NODE_ENV === "development" && !mapId && (
-              <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 bg-yellow-50 border border-yellow-300 text-yellow-900 px-3 py-2 rounded-lg text-xs shadow pointer-events-none">
-                No <b>mapId</b> provided — using legacy google.maps.Marker fallback.
-              </div>
-            )}
           </div>,
           overlayEl
         )}

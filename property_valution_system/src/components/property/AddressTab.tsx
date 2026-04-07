@@ -124,6 +124,8 @@ export const AddressTab: React.FC<AddressTabProps> = ({
   enableShapeDrawing = true,
   showMap = false,
   mapHeight = "700px",
+  requiredCoordinates = false,
+  fieldErrors,
   onReset,
   t,
 }) => {
@@ -248,6 +250,11 @@ export const AddressTab: React.FC<AddressTabProps> = ({
             value={effectiveAddressCodes}
             resolvedAddressItems={resolvedAddressItems}
             onAddressChange={onAddressChange}
+            errorMessages={{
+              provinceId: fieldErrors?.provinceId,
+              districtId: fieldErrors?.districtId,
+              communeId: fieldErrors?.communeId,
+            }}
           />
         </div>
 
@@ -391,12 +398,14 @@ export const AddressTab: React.FC<AddressTabProps> = ({
             <Label className="text-sm font-semibold flex items-center gap-2">
               <Navigation className="h-4 w-4 text-slate-600" />
               GPS Coordinates
+              {requiredCoordinates ? <span className="text-red-500">*</span> : null}
             </Label>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="latitude" className="text-xs text-muted-foreground flex items-center gap-1">
                   Latitude
+                  {requiredCoordinates ? <span className="text-red-500">*</span> : null}
                   {!coordinates.isValid && formData.latitude && (
                     <AlertCircle className="h-3 w-3 text-amber-500" />
                   )}
@@ -413,14 +422,19 @@ export const AddressTab: React.FC<AddressTabProps> = ({
                   className={cn(
                     "font-mono text-sm h-10",
                     !coordinates.isValid && formData.latitude ? "border-amber-300 bg-amber-50" : "",
-                    coordinates.isValid && formData.latitude ? "border-green-300 bg-green-50/50" : ""
+                    coordinates.isValid && formData.latitude ? "border-green-300 bg-green-50/50" : "",
+                    fieldErrors?.latitude ? "border-destructive bg-destructive/5" : ""
                   )}
                 />
+                {fieldErrors?.latitude ? (
+                  <p className="text-sm text-destructive">{fieldErrors.latitude}</p>
+                ) : null}
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="longitude" className="text-xs text-muted-foreground flex items-center gap-1">
                   Longitude
+                  {requiredCoordinates ? <span className="text-red-500">*</span> : null}
                   {!coordinates.isValid && formData.longitude && (
                     <AlertCircle className="h-3 w-3 text-amber-500" />
                   )}
@@ -437,9 +451,13 @@ export const AddressTab: React.FC<AddressTabProps> = ({
                   className={cn(
                     "font-mono text-sm h-10",
                     !coordinates.isValid && formData.longitude ? "border-amber-300 bg-amber-50" : "",
-                    coordinates.isValid && formData.longitude ? "border-green-300 bg-green-50/50" : ""
+                    coordinates.isValid && formData.longitude ? "border-green-300 bg-green-50/50" : "",
+                    fieldErrors?.longitude ? "border-destructive bg-destructive/5" : ""
                   )}
                 />
+                {fieldErrors?.longitude ? (
+                  <p className="text-sm text-destructive">{fieldErrors.longitude}</p>
+                ) : null}
               </div>
             </div>
             

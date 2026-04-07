@@ -28,6 +28,21 @@ const percentageDecimal = positiveDecimal.refine((value) => value <= 100, {
   message: "Must be between 0 and 100",
 });
 
+const coordinateNumber = z
+  .union([z.number(), z.string().trim().min(1, "Must be a valid number")])
+  .transform((value) => Number(value))
+  .refine((value) => Number.isFinite(value), {
+    message: "Must be a valid number",
+  });
+
+const latitudeSchema = coordinateNumber.refine((value) => value >= -90 && value <= 90, {
+  message: "Latitude must be between -90 and 90",
+});
+
+const longitudeSchema = coordinateNumber.refine((value) => value >= -180 && value <= 180, {
+  message: "Longitude must be between -180 and 180",
+});
+
 const geoJsonCoordinateSchema = z.tuple([z.number(), z.number()]);
 
 const geoJsonPolygonSchema = z.object({
@@ -47,22 +62,28 @@ const propertyAddressSchema = z.object({
   neighborLocation: z.string().nullable().optional(),
 });
 
-const propertyLocationSchema = z
-  .object({
-    latitude: z.union([z.number(), z.string()]).transform(Number).optional(),
-    longitude: z.union([z.number(), z.string()]).transform(Number).optional(),
-    googlePoint: z.string().optional(),
-    geolocationLink: z.string().optional(),
-    formattedAddress: z.string().optional(),
-    placeId: z.string().optional(),
-    polygon: z.union([z.string(), geoJsonPolygonSchema, z.null()]).optional(),
-  })
+const propertyLocationBaseSchema = z.object({
+  latitude: latitudeSchema.optional(),
+  longitude: longitudeSchema.optional(),
+  googlePoint: z.string().optional(),
+  geolocationLink: z.string().optional(),
+  formattedAddress: z.string().optional(),
+  placeId: z.string().optional(),
+  polygon: z.union([z.string(), geoJsonPolygonSchema, z.null()]).optional(),
+});
+
+const propertyLocationSchema = propertyLocationBaseSchema
   .refine(
     (data) =>
       (data.latitude === undefined && data.longitude === undefined) ||
       (data.latitude !== undefined && data.longitude !== undefined),
     { message: "latitude and longitude must be provided together" }
   );
+
+const requiredPropertyLocationSchema = propertyLocationBaseSchema.extend({
+  latitude: latitudeSchema,
+  longitude: longitudeSchema,
+});
 
 const dataSourceSchema = z.object({
   sourceType: z.nativeEnum(SourceTypeEnum),
@@ -97,8 +118,8 @@ const createPropertyForIndicativeSchema = z.object({
   status: z.nativeEnum(PropertyStatus).optional(),
   workflowStatus: z.nativeEnum(WorkflowStatus).optional(),
   description: z.string().optional(),
-  propertyAddress: propertyAddressSchema.optional(),
-  propertyLocation: propertyLocationSchema.optional(),
+  propertyAddress: propertyAddressSchema,
+  propertyLocation: requiredPropertyLocationSchema,
   dataSource: dataSourceSchema.optional(),
   titleDocument: titleDocumentSchema.optional(),
   propertyPhotos: propertyPhotosSchema.optional(),
@@ -148,6 +169,9 @@ const sharedIndicativeFields = {
   internalNotes: z.string().optional(),
 };
 
+const hasNonEmptyText = (value?: string | null) =>
+  typeof value === "string" && value.trim().length > 0;
+
 const sharedComponentFields = {
   componentType: z.enum(["LAND", "BUILDING", "OTHER"]).default("LAND"),
   description: z.string().max(255).optional(),
@@ -164,7 +188,11 @@ export const createIndicativeValuationSchema = z
     propertyId: z.number().int().positive().optional(),
     property: createPropertyForIndicativeSchema.optional(),
     ...sharedIndicativeFields,
+    status: z.nativeEnum(PropertyIndicativeValuationStatus),
+    workflowStatus: z.nativeEnum(WorkflowStatus),
     ...sharedComponentFields,
+    description: z.string().min(1).max(255),
+    area: positiveDecimal,
   })
   .superRefine((data, ctx) => {
     const hasPropertyId = typeof data.propertyId === "number";
@@ -183,6 +211,38 @@ export const createIndicativeValuationSchema = z
         code: z.ZodIssueCode.custom,
         message: "Provide either propertyId or property data, not both",
         path: ["propertyId"],
+      });
+    }
+
+    if (!hasNonEmptyText(data.instructedBy) && !hasNonEmptyText(data.preparedFor)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Instructed By is required",
+        path: ["instructedBy"],
+      });
+    }
+
+    if (!data.instructionDate && !data.dateOfInspection) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Instruction Date is required",
+        path: ["instructionDate"],
+      });
+    }
+
+    if (!data.indicationDate && !data.valuationDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Indication Date is required",
+        path: ["indicationDate"],
+      });
+    }
+
+    if (!hasNonEmptyText(data.intendedUse) && !hasNonEmptyText(data.purposeOfValuation)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Intended Use is required",
+        path: ["intendedUse"],
       });
     }
   });

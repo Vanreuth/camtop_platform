@@ -27,6 +27,7 @@ export const GoogleMapGIS = ({
   onMapLoad,
   showMarker = true,
 }: GoogleMapGISProps) => {
+  const effectiveMapId = mapId || "DEMO_MAP_ID";
   const center = useMemo(
     () => ({
       lat: coordinates.latitude,
@@ -161,12 +162,12 @@ export const GoogleMapGIS = ({
 
       <APIProvider
         apiKey={googleMapsApiKey}
-        libraries={["geometry", "drawing"]}
+        libraries={["geometry", "marker"]}
       >
         <Map
           defaultCenter={center}
           defaultZoom={7}
-          mapId={mapId || undefined}
+          mapId={effectiveMapId}
           gestureHandling="greedy"
           disableDefaultUI={false}
           style={{
@@ -185,7 +186,6 @@ export const GoogleMapGIS = ({
             onShapesChange={onShapesChange}
             existingPolygon={existingPolygon ?? undefined}
             disableBoundaryPinUpdate={disableBoundaryPinUpdate}
-            mapId={mapId || undefined}
             overlayRootId={overlayRootId}
             isFullscreen={isFullscreen}
             toggleFullscreen={toggleFullscreen}

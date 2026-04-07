@@ -36,11 +36,12 @@ import {PhotoUploadTab} from  "@/components/property/PhotoUploadTab"
 import { PropertyNavigationFooter } from "@/components/property/PropertyNavigationFooter";
 import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
 
-import { convertShapesToGeoJson, logPolygonInfo } from "@/utils/geoJsonConverter";
+import { convertShapesToGeoJson } from "@/utils/geoJsonConverter";
 import type {
   BuildingData,
   AddressCodes,
   ConfirmDialogState,
+  PropertyFormData,
 } from "@/types/property.types";
 import { usePropertyTypes } from "@/hooks/usePropertyTypes";
 import { PROPERTY_TYPE_IDS } from "@/constants/propertyConstants"
@@ -116,6 +117,18 @@ const parseCoordinatePairInput = (
   };
 };
 
+const PROPERTY_TABS = [
+  "basic",
+  "details",
+  "address",
+  "documents",
+  "source",
+  "transaction",
+] as const;
+
+type PropertyTab = (typeof PROPERTY_TABS)[number];
+type PropertyFieldErrorMap = Partial<Record<keyof PropertyFormData, string>>;
+
 export default function AddPropertyPage() {
   const router = useRouter();
   const createProperty = useCreateProperty();
@@ -124,11 +137,31 @@ export default function AddPropertyPage() {
   const { hasHierarchyLevel } = useAuth();
   const canSelectStatus = hasHierarchyLevel(2); // Admin/Manager = level <= 2
   const canSelectWorkflowStatus = hasHierarchyLevel(2); // Admin/Manager = level <= 2
-  const [currentTab, setCurrentTab] = useState("basic");
+  const [currentTab, setCurrentTab] = useState<PropertyTab>("basic");
+  const [fieldErrors, setFieldErrors] = useState<PropertyFieldErrorMap>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [shapes, setShapes] = useState<DrawnShape[]>([]);
   // Store GeoJSON separately to preserve polygon data even if Google Maps objects lose reference
   const [polygonGeoJson, setPolygonGeoJson] = useState<GeoJsonPolygon | null>(null);
+
+  const clearFieldErrors = useCallback(
+    (...fields: Array<keyof PropertyFormData>) => {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        let changed = false;
+
+        fields.forEach((item) => {
+          if (next[item]) {
+            delete next[item];
+            changed = true;
+          }
+        });
+
+        return changed ? next : prev;
+      });
+    },
+    []
+  );
 
   const propertyTypes = usePropertyTypes();
 
@@ -520,6 +553,7 @@ export default function AddPropertyPage() {
         "Are you sure you want to clear all basic information? This action cannot be undone.",
       onConfirm: () => {
         setFormData((prev) => ({ ...prev, ...INITIAL_BASIC_STATE }));
+        clearFieldErrors("propertyTypeId", "currentUseId");
         toast.success("Basic information cleared");
         setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
       },
@@ -556,6 +590,13 @@ export default function AddPropertyPage() {
         "Are you sure you want to clear all address and location information? This action cannot be undone.",
       onConfirm: () => {
         setFormData((prev) => ({ ...prev, ...INITIAL_ADDRESS_STATE }));
+        clearFieldErrors(
+          "provinceId",
+          "districtId",
+          "communeId",
+          "latitude",
+          "longitude"
+        );
         setAddressCodes({ ...EMPTY_ADD_PROPERTY_ADDRESS_CODES });
         setResolvedAddressItems({ ...EMPTY_RESOLVED_ADDRESS_ITEMS });
         setIsResolvingAddress(false);
@@ -579,6 +620,7 @@ export default function AddPropertyPage() {
         "Are you sure you want to clear all title deed information and uploaded photos? This action cannot be undone.",
       onConfirm: () => {
         setFormData((prev) => ({ ...prev, ...INITIAL_DOCUMENTS_STATE }));
+        clearFieldErrors("titleDeedType", "totalSizeByTitleDeed");
         setPhotos((prev) => ({
           ...prev,
           front: null,
@@ -611,6 +653,7 @@ export default function AddPropertyPage() {
         "Are you sure you want to clear all data source information? This action cannot be undone.",
       onConfirm: () => {
         setFormData((prev) => ({ ...prev, ...INITIAL_SOURCE_STATE }));
+        clearFieldErrors("sourceType", "phoneNumber");
         toast.success("Data source information cleared");
         setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
       },
@@ -629,6 +672,7 @@ export default function AddPropertyPage() {
           ...INITIAL_TRANSACTION_STATE,
           transactionDate: new Date().toISOString().split("T")[0],
         }));
+        clearFieldErrors("transactionType", "transactionDate", "totalPrice");
         toast.success("Transaction information cleared");
         setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
       },
@@ -649,8 +693,9 @@ export default function AddPropertyPage() {
         latitude: coords.latitude.toFixed(6),
         longitude: coords.longitude.toFixed(6),
       }));
+      clearFieldErrors("latitude", "longitude");
     },
-    []
+    [clearFieldErrors]
   );
 
   // 2. Handle Manual Dropdown Changes
@@ -664,7 +709,8 @@ export default function AddPropertyPage() {
       communeId: address.communeId ?? "",
       villageId: address.villageId ?? "",
     }));
-  }, []);
+    clearFieldErrors("provinceId", "districtId", "communeId");
+  }, [clearFieldErrors]);
 
   const completeResolvedHierarchyFromDetectedAddress = useCallback(
     async (
@@ -834,11 +880,6 @@ export default function AddPropertyPage() {
   const hadPolygonDrawnRef = useRef(false);
   
   const handleShapesChange = useCallback((newShapes: DrawnShape[]) => {
-    console.log("=== SHAPES CHANGED ===");
-    console.log("Shape count:", newShapes.length);
-    console.log("Had polygon before:", hadPolygonDrawnRef.current);
-    console.log("Current polygonGeoJson exists:", !!polygonGeoJson);
-    
     setShapes(newShapes);
     
     // Convert to GeoJSON immediately and store it
@@ -846,23 +887,13 @@ export default function AddPropertyPage() {
     if (newShapes.length > 0) {
       const geoJson = convertShapesToGeoJson(newShapes);
       if (geoJson) {
-        console.log("✅ GeoJSON created and stored successfully");
-        console.log("📐 Coordinates count:", geoJson.coordinates[0]?.length);
-        logPolygonInfo(geoJson, "Shape Changed");
         setPolygonGeoJson(geoJson);
         hadPolygonDrawnRef.current = true; // Mark that user drew a polygon
-      } else {
-        console.warn("⚠️ Failed to convert shapes to GeoJSON");
-        // Don't clear existing GeoJSON if conversion failed
       }
     } else if (hadPolygonDrawnRef.current && polygonGeoJson) {
       // User had polygon before, and we still have GeoJSON stored
       // This is likely a component remount - PRESERVE the GeoJSON
-      console.log("📌 Empty shapes received but preserving existing GeoJSON (likely tab switch remount)");
       // Don't clear polygonGeoJson - it will be sent with the form submission
-    } else {
-      // No polygon was ever drawn - this is expected behavior
-      console.log("📌 No shapes and no prior polygon - nothing to preserve");
     }
   }, [polygonGeoJson]);
 
@@ -1448,6 +1479,7 @@ export default function AddPropertyPage() {
           latitude: coordinatePair.latitude,
           longitude: coordinatePair.longitude,
         }));
+        clearFieldErrors("latitude", "longitude");
         return;
       }
     }
@@ -1465,11 +1497,13 @@ export default function AddPropertyPage() {
           latitude: coordinatePair.latitude,
           longitude: coordinatePair.longitude,
         }));
+        clearFieldErrors("latitude", "longitude");
         return;
       }
     }
 
     setFormData((prev) => ({ ...prev, [field]: value }));
+    clearFieldErrors(field as keyof PropertyFormData);
   };
   const addBuilding = () => {
     setFormData((prev) => ({
@@ -1644,52 +1678,73 @@ export default function AddPropertyPage() {
         return obj;
       };
 
-      // Vialidation
-      const errors: string[] = [];
+      // Validation grouped by tab so submit can focus the user on the right section.
+      const errorsByTab: Record<PropertyTab, string[]> = {
+        basic: [],
+        details: [],
+        address: [],
+        documents: [],
+        source: [],
+        transaction: [],
+      };
+      const nextFieldErrors: PropertyFieldErrorMap = {};
+      const pushValidationError = (
+        tab: PropertyTab,
+        message: string,
+        field?: keyof PropertyFormData,
+      ) => {
+        errorsByTab[tab].push(message);
+        if (field && !nextFieldErrors[field]) {
+          nextFieldErrors[field] = message;
+        }
+      };
 
       // Required fields validation
       if (!formData.propertyTypeId) {
-        errors.push("Property type is required");
+        pushValidationError("basic", t("propertyTypeRequired"), "propertyTypeId");
       }
       if (!formData.currentUseId) {
-        errors.push("Current use is required");
+        pushValidationError("basic", t("currentUseRequired"), "currentUseId");
+      }
+      if (!formData.titleDeedType) {
+        pushValidationError("documents", t("titleDeedTypeRequired"), "titleDeedType");
       }
       // Title document validation
       if (!formData.totalSizeByTitleDeed) {
-        errors.push("Total size by title deed is required");
+        pushValidationError("documents", t("totalSizeByTitleDeedRequired"), "totalSizeByTitleDeed");
       }
       if (formData.totalSizeByTitleDeed) {
         const size = parseFloat(formData.totalSizeByTitleDeed);
         if (isNaN(size) || size <= 0) {
-          errors.push("Total size by title deed must be a positive number");
+          pushValidationError("documents", "Total size by title deed must be a positive number", "totalSizeByTitleDeed");
         } else if (size < 10) {
-          errors.push("Total size by title deed must be at least 10 m²");
+          pushValidationError("documents", "Total size by title deed must be at least 10 m²", "totalSizeByTitleDeed");
         } else if (size > 1000000) {
-          errors.push("Total size by title deed cannot exceed 1,000,000 m²");
+          pushValidationError("documents", "Total size by title deed cannot exceed 1,000,000 m²", "totalSizeByTitleDeed");
         }
       }
 
       if (!formData.provinceId) {
-        errors.push("Province is required");
+        pushValidationError("address", t("provinceRequired"), "provinceId");
       }
       if (!formData.districtId) {
-        errors.push("District is required");
+        pushValidationError("address", t("districtRequired"), "districtId");
       }
       if (!formData.communeId) {
-        errors.push("Commune is required");
+        pushValidationError("address", t("communeRequired"), "communeId");
       }
 
       // Coordinates validation
       if (formData.latitude) {
         const lat = parseFloat(formData.latitude);
         if (isNaN(lat) || lat < -90 || lat > 90) {
-          errors.push("Latitude must be between -90 and 90");
+          pushValidationError("address", "Latitude must be between -90 and 90", "latitude");
         }
       }
       if (formData.longitude) {
         const lng = parseFloat(formData.longitude);
         if (isNaN(lng) || lng < -180 || lng > 180) {
-          errors.push("Longitude must be between -180 and 180");
+          pushValidationError("address", "Longitude must be between -180 and 180", "longitude");
         }
       }
 
@@ -1701,7 +1756,8 @@ export default function AddPropertyPage() {
           formData.lengthMeters ||
           formData.landAreaSqm
         ) {
-          errors.push(
+          pushValidationError(
+            "details",
             "Land fields should not be filled for building-only property"
           );
         }
@@ -1710,19 +1766,19 @@ export default function AddPropertyPage() {
         if (formData.widthMeters) {
           const width = parseFloat(formData.widthMeters);
           if (isNaN(width) || width <= 0) {
-            errors.push("Width must be a positive number");
+            pushValidationError("details", "Width must be a positive number");
           }
         }
         if (formData.lengthMeters) {
           const length = parseFloat(formData.lengthMeters);
           if (isNaN(length) || length <= 0) {
-            errors.push("Length must be a positive number");
+            pushValidationError("details", "Length must be a positive number");
           }
         }
         if (formData.landAreaSqm) {
           const area = parseFloat(formData.landAreaSqm);
           if (isNaN(area) || area <= 0) {
-            errors.push("Land area must be a positive number");
+            pushValidationError("details", "Land area must be a positive number");
           }
         }
       }
@@ -1732,14 +1788,15 @@ export default function AddPropertyPage() {
         if (formData.totalFloors) {
           const floors = parseInt(formData.totalFloors);
           if (isNaN(floors) || floors <= 0 || floors > 200) {
-            errors.push("Total floors must be between 1 and 200");
+            pushValidationError("details", "Total floors must be between 1 and 200");
           }
         }
         if (formData.builtYear) {
           const year = parseInt(formData.builtYear);
           const currentYear = new Date().getFullYear();
           if (isNaN(year) || year < 1900 || year > currentYear + 5) {
-            errors.push(
+            pushValidationError(
+              "details",
               `Built year must be between 1900 and ${currentYear + 5}`
             );
           }
@@ -1747,25 +1804,25 @@ export default function AddPropertyPage() {
         if (formData.buildingAreaSqm) {
           const area = parseFloat(formData.buildingAreaSqm);
           if (isNaN(area) || area <= 0) {
-            errors.push("Building area must be a positive number");
+            pushValidationError("details", "Building area must be a positive number");
           }
         }
         if (formData.floorAreaSqm) {
           const area = parseFloat(formData.floorAreaSqm);
           if (isNaN(area) || area <= 0) {
-            errors.push("Floor area must be a positive number");
+            pushValidationError("details", "Floor area must be a positive number");
           }
         }
         if (formData.bedrooms) {
           const beds = parseInt(formData.bedrooms);
           if (isNaN(beds) || beds < 0 || beds > 100) {
-            errors.push("Bedrooms must be between 0 and 100");
+            pushValidationError("details", "Bedrooms must be between 0 and 100");
           }
         }
         if (formData.bathrooms) {
           const baths = parseInt(formData.bathrooms);
           if (isNaN(baths) || baths < 0 || baths > 100) {
-            errors.push("Bathrooms must be between 0 and 100");
+            pushValidationError("details", "Bathrooms must be between 0 and 100");
           }
         }
       }
@@ -1778,21 +1835,24 @@ export default function AddPropertyPage() {
         );
 
         if (requiresDirectUnits && totalUnits === 0) {
-          errors.push(
+          pushValidationError(
+            "details",
             "At least one unit is required for this property type."
           );
         }
 
         formData.buildings.forEach((building, buildingIndex) => {
           if (!requiresDirectUnits && !building.buildingSubtypeId?.trim()) {
-            errors.push(
+            pushValidationError(
+              "details",
               `Building ${buildingIndex + 1}: Construction type is required`
             );
           }
 
           building.units.forEach((unit, unitIndex) => {
             if (!unit.unitType?.trim()) {
-              errors.push(
+              pushValidationError(
+                "details",
                 `Building ${buildingIndex + 1}, Unit ${
                   unitIndex + 1
                 }: Unit type is required`
@@ -1804,16 +1864,16 @@ export default function AddPropertyPage() {
 
       // Data source validation
       if (!formData.sourceType) {
-        errors.push("Data source type is required");
+        pushValidationError("source", t("sourceTypeRequired"), "sourceType");
       }
       if (!formData.phoneNumber?.trim()) {
-        errors.push("Phone number is required");
+        pushValidationError("source", t("phoneNumberRequired"), "phoneNumber");
       }
       if (formData.phoneNumber) {
         // Basic phone validation (adjust pattern as needed)
         const phonePattern = /^[\d\s\-\+\(\)]+$/;
         if (!phonePattern.test(formData.phoneNumber)) {
-          errors.push("Phone number contains invalid characters");
+          pushValidationError("source", "Phone number contains invalid characters", "phoneNumber");
         }
       }
 
@@ -1821,21 +1881,21 @@ export default function AddPropertyPage() {
 
       // Transaction Type validation
       if (!normalizedTransactionType) {
-        errors.push("📋 Transaction type is required");
+        pushValidationError("transaction", t("transactionTypeRequired"));
       }
 
       // Transaction Date validation
       if (!formData.transactionDate || formData.transactionDate.trim() === "") {
-        errors.push("📅 Transaction date is required");
+        pushValidationError("transaction", t("transactionDateRequired"));
       }
 
       // Total Price validation
       if (!formData.totalPrice || !formData.totalPrice.trim()) {
-        errors.push("💰 Total price is required");
+        pushValidationError("transaction", t("totalPriceRequired"));
       } else {
         const totalPrice = parseFloat(formData.totalPrice);
         if (isNaN(totalPrice) || totalPrice <= 0) {
-          errors.push("💰 Total price must be a positive number");
+          pushValidationError("transaction", t("totalPricePositive"));
         }
       }
 
@@ -1870,14 +1930,16 @@ export default function AddPropertyPage() {
                 .filter((value): value is number => value !== null);
 
               if (invalidResidualBuildings.length > 0) {
-                errors.push(
+                pushValidationError(
+                  "details",
                   `🏗️ Residual Method requires valid Gross Area, Replacement Cost per m², and Useful Life for every building. Missing in Building: ${invalidResidualBuildings.join(
                     ", "
                   )}.`
                 );
               }
             } else {
-              errors.push(
+              pushValidationError(
+                "details",
                 "🏗️ This property type with transaction requires at least one building with 'Replacement Cost per m²' for Residual Method calculation."
               );
             }
@@ -1887,22 +1949,26 @@ export default function AddPropertyPage() {
         }
       }
 
-      // Show all validation errors
-      if (errors.length > 0) {
-        errors.forEach((error) => toast.error(error));
+      const firstInvalidTab = PROPERTY_TABS.find(
+        (tab) => errorsByTab[tab].length > 0
+      );
+
+      if (firstInvalidTab) {
+        setFieldErrors(nextFieldErrors);
+        [...new Set(errorsByTab[firstInvalidTab])]
+          .slice(0, 5)
+          .forEach((error) => toast.error(error));
+        setCurrentTab(firstInvalidTab);
         setIsSubmitting(false);
         return;
       }
+
+      setFieldErrors({});
 
       // ==========================================
       // 📦 BUILD PAYLOAD
       // ==========================================
 
-      // Debug: Log polygon state before building payload
-      console.log("🔍 === PAYLOAD BUILD START ===");
-      console.log("🔍 shapes.length:", shapes.length);
-      console.log("🔍 polygonGeoJson:", polygonGeoJson);
-      
       // Build payload
       const payload: any = {
         propertyName: formData.propertyName?.trim() || undefined,
@@ -2105,42 +2171,12 @@ export default function AddPropertyPage() {
         });
       }
 
-      // Add transaction data if total price is provided
-      if (formData.totalPrice && formData.totalPrice.trim()) {
-        const totalPriceValue = parseFloat(formData.totalPrice);
-
-        // Only add transaction if total price is valid and positive
-        if (!isNaN(totalPriceValue) && totalPriceValue > 0) {
-          cleanedPayload.transaction = cleanNullValues({
-            transactionType: normalizedTransactionType,
-            transactionDate: formData.transactionDate,
-            totalPrice: totalPriceValue,
-          });
-        } else {
-        }
-      } else {
-      }
-
-      // Log polygon data if present
-      if (cleanedPayload.propertyLocation?.polygon) {
-        console.log(
-          "📐 Polygon data included in payload:",
-          cleanedPayload.propertyLocation.polygon
-        );
-        console.log(
-          "📍 Number of coordinates:",
-          cleanedPayload.propertyLocation.polygon.coordinates[0]?.length
-        );
-      } else {
-        console.warn("⚠️ No polygon in propertyLocation");
-        console.log("🔍 Current shapes state:", shapes.length, "shapes");
-        console.log("🔍 Stored polygonGeoJson:", polygonGeoJson);
-        
-        // If we have stored GeoJSON but it wasn't included, something went wrong
-        if (polygonGeoJson) {
-          console.error("❌ polygonGeoJson exists but wasn't included in payload!");
-        }
-      }
+      const totalPriceValue = parseFloat(formData.totalPrice);
+      cleanedPayload.transaction = cleanNullValues({
+        transactionType: normalizedTransactionType ?? "SALE",
+        transactionDate: formData.transactionDate,
+        totalPrice: totalPriceValue,
+      });
 
       // ==========================================
       // 📤 PREPARE FORMDATA FOR FILE UPLOADS
@@ -2155,11 +2191,6 @@ export default function AddPropertyPage() {
           // For nested objects, stringify them
           const jsonValue = JSON.stringify(cleanedPayload[key]);
           formDataToSend.append(key, jsonValue);
-          
-          // Debug log for propertyLocation
-          if (key === "propertyLocation") {
-            console.log("📤 Sending propertyLocation:", jsonValue);
-          }
         } else if (
           cleanedPayload[key] !== null &&
           cleanedPayload[key] !== undefined
@@ -2207,7 +2238,6 @@ export default function AddPropertyPage() {
       const propertyId = result.propertyId ?? result.id;
       setTimeout(() => {
         if (propertyId) {
-          console.log(`🔄 Navigating to property detail page: ${propertyId}`);
           router.push(`/dashboard/property/${propertyId}?from=create`);
         } else {
           router.push("/dashboard/property");
@@ -2235,7 +2265,7 @@ export default function AddPropertyPage() {
       <div className="max-w-8xl mx-auto px-4 pb-8 pt-6">
         <Tabs
           value={currentTab}
-          onValueChange={setCurrentTab}
+          onValueChange={(value) => setCurrentTab(value as PropertyTab)}
           className="space-y-6"
         >
           <div className="sticky top-[77px] z-40 bg-background/95border-b shadow-sm rounded-md backdrop-blur  supports-[backdrop-filter]:bg-background/60">
@@ -2271,6 +2301,10 @@ export default function AddPropertyPage() {
               canSelectStatus={canSelectStatus}
               canSelectWorkflowStatus={canSelectWorkflowStatus}
               showWorkflowStatus={canSelectWorkflowStatus}
+              fieldErrors={fieldErrors}
+              onClearFieldError={(field) =>
+                clearFieldErrors(field as keyof PropertyFormData)
+              }
               t={t}
             />
           </TabsContent>
@@ -2475,6 +2509,8 @@ export default function AddPropertyPage() {
               enableShapeDrawing={true}
               showMap={true}
               mapHeight="700px"
+              requiredCoordinates={true}
+              fieldErrors={fieldErrors}
               t={t}
               onReset={resetAddressTab}
             />
@@ -2489,6 +2525,8 @@ export default function AddPropertyPage() {
               onUpload={handlePhotoUpload}
               onRemove={removePhoto}
               onReset={resetDocumentsTab}
+              fieldErrors={fieldErrors}
+              onClearFieldError={clearFieldErrors}
             />
           </TabsContent>
 
@@ -2498,6 +2536,10 @@ export default function AddPropertyPage() {
               formData={formData}
               onInputChange={handleInputChange}
               onReset={resetSourceTab}
+              fieldErrors={fieldErrors}
+              onClearFieldError={(field) =>
+                clearFieldErrors(field as keyof PropertyFormData)
+              }
               t={t}
               tc={tc}
             />
@@ -2508,6 +2550,10 @@ export default function AddPropertyPage() {
               formData={formData}
               onInputChange={handleInputChange}
               onReset={resetTransactionTab}
+              fieldErrors={fieldErrors}
+              onClearFieldError={(field) =>
+                clearFieldErrors(field as keyof PropertyFormData)
+              }
               t={t}
               tc={tc}
             />
@@ -2519,31 +2565,15 @@ export default function AddPropertyPage() {
           currentTab={currentTab}
           isSubmitting={isSubmitting}
           onPrevious={() => {
-            const tabs = [
-              "basic",
-              "details",
-              "address",
-              "documents",
-              "source",
-              "transaction",
-            ];
-            const currentIndex = tabs.indexOf(currentTab);
+            const currentIndex = PROPERTY_TABS.indexOf(currentTab);
             if (currentIndex > 0) {
-              setCurrentTab(tabs[currentIndex - 1]);
+              setCurrentTab(PROPERTY_TABS[currentIndex - 1]);
             }
           }}
           onNext={() => {
-            const tabs = [
-              "basic",
-              "details",
-              "address",
-              "documents",
-              "source",
-              "transaction",
-            ];
-            const currentIndex = tabs.indexOf(currentTab);
-            if (currentIndex < tabs.length - 1) {
-              setCurrentTab(tabs[currentIndex + 1]);
+            const currentIndex = PROPERTY_TABS.indexOf(currentTab);
+            if (currentIndex < PROPERTY_TABS.length - 1) {
+              setCurrentTab(PROPERTY_TABS[currentIndex + 1]);
             }
           }}
           onSubmit={handleSubmit}

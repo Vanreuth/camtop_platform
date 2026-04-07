@@ -2,6 +2,15 @@
 import { DrawnShape } from "@/types/googleMap.types";
 import { GeoJsonPolygon } from "@/hooks/propertyValuation/propertyValuation.types";
 
+const isPolygonDebugEnabled =
+  process.env.NEXT_PUBLIC_DEBUG_POLYGON === "true";
+
+const debugPolygonLog = (...args: unknown[]) => {
+  if (isPolygonDebugEnabled) {
+    console.log(...args);
+  }
+};
+
 /**
  * Convert a Google Maps Polygon path to GeoJSON coordinates
  */
@@ -90,12 +99,9 @@ export const convertShapesToGeoJson = (
   shapes: DrawnShape[]
 ): GeoJsonPolygon | null => {
   if (!shapes || shapes.length === 0) {
-    console.log("📐 convertShapesToGeoJson: No shapes provided");
     return null;
   }
-  
-  console.log("📐 convertShapesToGeoJson: Processing", shapes.length, "shapes");
-  
+
   // Priority: Use polygon first, then rectangle, then circle
   const polygonShape = shapes.find((s) => s.type === "polygon");
   const rectangleShape = shapes.find((s) => s.type === "rectangle");
@@ -105,7 +111,6 @@ export const convertShapesToGeoJson = (
   
   try {
     if (polygonShape?.shape) {
-      console.log("📐 Converting polygon shape");
       // Verify the shape has the required method
       if (typeof (polygonShape.shape as any).getPath !== 'function') {
         console.error("❌ Polygon shape doesn't have getPath method:", polygonShape.shape);
@@ -113,7 +118,6 @@ export const convertShapesToGeoJson = (
       }
       coordinates = polygonToGeoJson(polygonShape.shape as google.maps.Polygon);
     } else if (rectangleShape?.shape) {
-      console.log("📐 Converting rectangle shape");
       // Verify the shape has the required method
       if (typeof (rectangleShape.shape as any).getBounds !== 'function') {
         console.error("❌ Rectangle shape doesn't have getBounds method:", rectangleShape.shape);
@@ -121,7 +125,6 @@ export const convertShapesToGeoJson = (
       }
       coordinates = rectangleToGeoJson(rectangleShape.shape as google.maps.Rectangle);
     } else if (circleShape?.shape) {
-      console.log("📐 Converting circle shape");
       // Verify the shape has the required methods
       if (typeof (circleShape.shape as any).getCenter !== 'function' || 
           typeof (circleShape.shape as any).getRadius !== 'function') {
@@ -130,17 +133,15 @@ export const convertShapesToGeoJson = (
       }
       coordinates = circleToGeoJson(circleShape.shape as google.maps.Circle);
     } else {
-      console.warn("⚠️ No valid shape found in shapes array");
+      debugPolygonLog("No valid shape found in shapes array");
     }
   } catch (error) {
     console.error("❌ Error converting shape to GeoJSON:", error);
     return null;
   }
-  
-  console.log("📐 Coordinates generated:", coordinates.length, "points");
-  
+
   if (coordinates.length === 0) {
-    console.warn("⚠️ Empty coordinates after conversion");
+    debugPolygonLog("Empty coordinates after conversion");
     return null;
   }
   
@@ -173,8 +174,10 @@ export const convertShapesToGeoJson = (
  * Log polygon info for debugging
  */
 export const logPolygonInfo = (polygon: GeoJsonPolygon | null, label: string = "Polygon") => {
+  if (!isPolygonDebugEnabled) return;
+
   if (!polygon) {
-    console.log(`❌ ${label}: No polygon data`);
+    debugPolygonLog(`❌ ${label}: No polygon data`);
     return;
   }
   
@@ -183,7 +186,7 @@ export const logPolygonInfo = (polygon: GeoJsonPolygon | null, label: string = "
     ring[0][0] === ring[ring.length - 1][0] && 
     ring[0][1] === ring[ring.length - 1][1];
   
-  console.log(`✅ ${label}:`, {
+  debugPolygonLog(`✅ ${label}:`, {
     type: polygon.type,
     totalRings: polygon.coordinates.length,
     pointsInRing: ring.length,

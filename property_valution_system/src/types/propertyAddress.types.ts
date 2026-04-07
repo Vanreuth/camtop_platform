@@ -107,6 +107,8 @@ export interface AddressTabProps {
   enableShapeDrawing?: boolean;
   showMap?: boolean;
   mapHeight?: string;
+  requiredCoordinates?: boolean;
+  fieldErrors?: Partial<Record<string, string>>;
   onReset?: () => void;
   t: (key: string) => string;
 }

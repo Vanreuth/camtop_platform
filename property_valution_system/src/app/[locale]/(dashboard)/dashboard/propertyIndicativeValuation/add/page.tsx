@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import { type FieldErrors, useForm } from "react-hook-form";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/lib/navigation";
 import { toast } from "sonner";
@@ -110,11 +110,17 @@ const pickFirstNonEmpty = (...values: Array<string | null | undefined>): string 
 const DEFAULT_NOTE =
   "All information such as land size, building size, location and pictures/images and so on are provided by the bank/client, they are the subjects to be inspected. We, CAMTOP Property Group disclaim all responsibility and will accept no liability to any party";
 
+const requiredText = (message: string) => z.string().trim().min(1, message);
+
 const schema = z.object({
   currency: z.string().min(3).max(3).default("USD"),
-  status: z.enum(PROPERTY_VALUATION_STATUS).default("ACTIVE"),
-  workflowStatus: z.enum(WORKFLOW_STATUS).default("DRAFT"),
-  instructedBy: z.string().optional(),
+  status: z.enum(PROPERTY_VALUATION_STATUS, {
+    required_error: "Indicative valuation status is required",
+  }),
+  workflowStatus: z.enum(WORKFLOW_STATUS, {
+    required_error: "Workflow status is required",
+  }),
+  instructedBy: requiredText("Instructed By is required"),
   contactName: z.string().optional(),
   contactTel: z.string().optional(),
   accessValue: z.string().optional(),
@@ -122,9 +128,9 @@ const schema = z.object({
   discount: z.string().optional(),
   valuerId: z.string().optional(),
   inspectorName: z.string().optional(),
-  indicationDate: z.string().optional(),
-  instructionDate: z.string().optional(),
-  intendedUse: z.string().optional(),
+  indicationDate: requiredText("Indication Date is required"),
+  instructionDate: requiredText("Instruction Date is required"),
+  intendedUse: requiredText("Intended Use is required"),
   forcedSalePercent: z.string().optional(),
   note: z.string().optional().default(DEFAULT_NOTE),
   internalNotes: z.string().optional(),
@@ -139,6 +145,14 @@ type ConfirmDialogState = {
   description: string;
   onConfirm: () => void;
 };
+const invalidFieldTabMap = {
+  workflowStatus: "introduction",
+  status: "introduction",
+  instructedBy: "introduction",
+  instructionDate: "introduction",
+  indicationDate: "introduction",
+  intendedUse: "introduction",
+} as const satisfies Partial<Record<keyof FormInputValues, TabKey>>;
 type ComponentDraft = IndicativeComponentDraftValue;
 type NewPropertyDraft = {
   propertyTypeId: string;
@@ -168,6 +182,16 @@ const parseOptionalNumber = (value?: string | number) => {
   if (!normalized) return undefined;
   const numeric = Number(normalized);
   return Number.isFinite(numeric) ? numeric : undefined;
+};
+
+const parseValidatedCoordinate = (
+  value: string,
+  min: number,
+  max: number,
+) => {
+  const numeric = parseOptionalNumber(value);
+  if (numeric === undefined || numeric < min || numeric > max) return undefined;
+  return numeric;
 };
 
 const parseCoordinatePairInput = (
@@ -1240,19 +1264,38 @@ export default function AddPropertyIndicativeValuationPage() {
       return;
     }
 
-    if (
-      !hasFilledValue(values.instructedBy) ||
-      !hasFilledValue(values.intendedUse) ||
-      !hasFilledValue(values.instructionDate) ||
-      !hasFilledValue(values.indicationDate)
-    ) {
-      toast.error(t("errors.pdfFieldsRequired"));
-      setActiveTab("introduction");
-      return;
-    }
+    const provinceId = pickFirstNonEmpty(newProperty.provinceId, addressCodes.provinceId);
+    const districtId = pickFirstNonEmpty(newProperty.districtId, addressCodes.districtId);
+    const communeId = pickFirstNonEmpty(newProperty.communeId, addressCodes.communeId);
+    const latitude = parseValidatedCoordinate(newProperty.latitude, -90, 90);
+    const longitude = parseValidatedCoordinate(newProperty.longitude, -180, 180);
+
+    const propertyErrors: string[] = [];
 
     if (!newProperty.propertyTypeId) {
-      toast.error(t("errors.propertyTypeRequired"));
+      propertyErrors.push(t("errors.propertyTypeRequired"));
+    }
+
+    if (!provinceId) {
+      propertyErrors.push(t("errors.provinceRequired"));
+    }
+
+    if (!districtId) {
+      propertyErrors.push(t("errors.districtRequired"));
+    }
+
+    if (!communeId) {
+      propertyErrors.push(t("errors.communeRequired"));
+    }
+
+    if (!hasFilledValue(newProperty.latitude) || !hasFilledValue(newProperty.longitude)) {
+      propertyErrors.push(t("errors.coordinatesRequired"));
+    } else if (latitude === undefined || longitude === undefined) {
+      propertyErrors.push(t("errors.coordinatesInvalid"));
+    }
+
+    if (propertyErrors.length > 0) {
+      [...new Set(propertyErrors)].slice(0, 5).forEach((message) => toast.error(message));
       setActiveTab("property");
       return;
     }
@@ -1267,7 +1310,31 @@ export default function AddPropertyIndicativeValuationPage() {
       return;
     }
 
-    const invalidComponent = componentRows.find((component) => {
+    const primaryIndicationErrors: string[] = [];
+
+    if (!primaryComponent.description.trim()) {
+      primaryIndicationErrors.push(t("errors.primaryIndicationDescriptionRequired"));
+    }
+
+    if (!primaryComponent.area) {
+      primaryIndicationErrors.push(t("errors.primaryIndicationAreaRequired"));
+    }
+
+    if (!primaryComponent.minRate) {
+      primaryIndicationErrors.push(t("errors.primaryIndicationMinRateRequired"));
+    }
+
+    if (!primaryComponent.maxRate) {
+      primaryIndicationErrors.push(t("errors.primaryIndicationMaxRateRequired"));
+    }
+
+    if (primaryIndicationErrors.length > 0) {
+      [...new Set(primaryIndicationErrors)].slice(0, 5).forEach((message) => toast.error(message));
+      setActiveTab("valuation");
+      return;
+    }
+
+    const invalidComponent = componentRows.slice(1).find((component) => {
       const requiresArea =
         component.componentType === "BUILDING" ||
         component.componentType === "OTHER" ||
@@ -1286,6 +1353,15 @@ export default function AddPropertyIndicativeValuationPage() {
       setActiveTab("valuation");
       return;
     }
+
+    const propertyDraftForPayload = {
+      ...newProperty,
+      provinceId: provinceId ?? "",
+      districtId: districtId ?? "",
+      communeId: communeId ?? "",
+      latitude: latitude?.toFixed(6) ?? newProperty.latitude,
+      longitude: longitude?.toFixed(6) ?? newProperty.longitude,
+    };
 
     const payload = {
       currency: "USD",
@@ -1316,13 +1392,13 @@ export default function AddPropertyIndicativeValuationPage() {
       minRate: primaryComponent.minRateValue,
       maxRate: primaryComponent.maxRateValue,
       property: {
-        propertyTypeId: Number(newProperty.propertyTypeId),
-        propertySubtypeId: parseOptionalNumber(newProperty.propertySubtypeId),
-        currentUseId: parseOptionalNumber(newProperty.currentUseId),
-        propertyName: normalizeOptionalText(newProperty.propertyName),
-        description: normalizeOptionalText(newProperty.description),
-        propertyAddress: buildPropertyAddressInput(newProperty),
-        propertyLocation: buildLocationInput(newProperty, shapes, polygonGeoJson),
+        propertyTypeId: Number(propertyDraftForPayload.propertyTypeId),
+        propertySubtypeId: parseOptionalNumber(propertyDraftForPayload.propertySubtypeId),
+        currentUseId: parseOptionalNumber(propertyDraftForPayload.currentUseId),
+        propertyName: normalizeOptionalText(propertyDraftForPayload.propertyName),
+        description: normalizeOptionalText(propertyDraftForPayload.description),
+        propertyAddress: buildPropertyAddressInput(propertyDraftForPayload),
+        propertyLocation: buildLocationInput(propertyDraftForPayload, shapes, polygonGeoJson),
       },
     };
 
@@ -1402,6 +1478,33 @@ export default function AddPropertyIndicativeValuationPage() {
     }
 
     router.push(`/dashboard/propertyIndicativeValuation/${result.valuationId}`);
+  }, (errors: FieldErrors<FormInputValues>) => {
+    const orderedInvalidFields = Object.keys(invalidFieldTabMap).filter(
+      (field) => Boolean(errors[field as keyof FormInputValues]),
+    ) as Array<keyof typeof invalidFieldTabMap>;
+
+    if (!orderedInvalidFields.length) {
+      toast.error(t("errors.pdfFieldsRequired"));
+      return;
+    }
+
+    const messageByField = {
+      workflowStatus: t("errors.workflowStatusRequired"),
+      status: t("errors.indicativeValuationStatusRequired"),
+      instructedBy: t("errors.instructedByRequired"),
+      instructionDate: t("errors.instructionDateRequired"),
+      indicationDate: t("errors.indicationDateRequired"),
+      intendedUse: t("errors.intendedUseRequired"),
+    } as const;
+
+    const messages = orderedInvalidFields
+      .map((field) => messageByField[field] ?? errors[field as keyof FormInputValues]?.message)
+      .filter((message): message is string => typeof message === "string" && message.trim().length > 0);
+
+    [...new Set(messages)].slice(0, 5).forEach((message) => toast.error(message));
+
+    setActiveTab("introduction");
+    form.setFocus(orderedInvalidFields[0] as keyof FormInputValues);
   });
 
   return (
@@ -1487,7 +1590,10 @@ export default function AddPropertyIndicativeValuationPage() {
                               <FormLabel>{renderRequiredLabel(t("fields.instructedBy"))}</FormLabel>
                               <Select
                                 value={field.value?.trim() ? field.value : "__none"}
-                                onValueChange={(value) => field.onChange(value === "__none" ? "" : value)}
+                                onValueChange={(value) => {
+                                  field.onChange(value === "__none" ? "" : value);
+                                  form.clearErrors("instructedBy");
+                                }}
                                 disabled={createMutation.isPending}
                               >
                                 <FormControl>
@@ -1516,7 +1622,10 @@ export default function AddPropertyIndicativeValuationPage() {
                               <FormLabel>{renderRequiredLabel(t("fields.intendedUse"))}</FormLabel>
                               <Select
                                 value={field.value?.trim() ? field.value : "__none"}
-                                onValueChange={(value) => field.onChange(value === "__none" ? "" : value)}
+                                onValueChange={(value) => {
+                                  field.onChange(value === "__none" ? "" : value);
+                                  form.clearErrors("intendedUse");
+                                }}
                                 disabled={createMutation.isPending}
                               >
                                 <FormControl>
@@ -1544,10 +1653,13 @@ export default function AddPropertyIndicativeValuationPage() {
                           name="workflowStatus"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>{t("fields.workflowStatus")}</FormLabel>
+                              <FormLabel>{renderRequiredLabel(t("fields.workflowStatus"))}</FormLabel>
                               <Select
                                 value={field.value ?? "DRAFT"}
-                                onValueChange={field.onChange}
+                                onValueChange={(value) => {
+                                  field.onChange(value);
+                                  form.clearErrors("workflowStatus");
+                                }}
                                 disabled={!canSelectStatus || createMutation.isPending}
                               >
                                 <FormControl>
@@ -1577,10 +1689,13 @@ export default function AddPropertyIndicativeValuationPage() {
                           name="status"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>{t("fields.indicativeValuationStatus")}</FormLabel>
+                              <FormLabel>{renderRequiredLabel(t("fields.indicativeValuationStatus"))}</FormLabel>
                               <Select
                                 value={field.value ?? "ACTIVE"}
-                                onValueChange={field.onChange}
+                                onValueChange={(value) => {
+                                  field.onChange(value);
+                                  form.clearErrors("status");
+                                }}
                                 disabled={!canSelectStatus || createMutation.isPending}
                               >
                                 <FormControl>
@@ -1619,6 +1734,10 @@ export default function AddPropertyIndicativeValuationPage() {
                                   {...field}
                                   className="h-11"
                                   disabled={createMutation.isPending}
+                                  onChange={(event) => {
+                                    field.onChange(event);
+                                    form.clearErrors("instructionDate");
+                                  }}
                                   type="date"
                                   required
                                 />
@@ -1639,6 +1758,10 @@ export default function AddPropertyIndicativeValuationPage() {
                                   {...field}
                                   className="h-11"
                                   disabled={createMutation.isPending}
+                                  onChange={(event) => {
+                                    field.onChange(event);
+                                    form.clearErrors("indicationDate");
+                                  }}
                                   type="date"
                                   required
                                 />
@@ -1679,6 +1802,7 @@ export default function AddPropertyIndicativeValuationPage() {
                     enableShapeDrawing={true}
                     showMap={true}
                     mapHeight="600px"
+                    requiredCoordinates
                     onReset={resetAddressTab}
                     t={tp}
                   />

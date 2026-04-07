@@ -438,47 +438,6 @@ export default function PropertyMapPage() {
     valuationMethod,
   ]);
 
-  useEffect(() => {
-    if (process.env.NODE_ENV === "production") return;
-    if (!activeQuery.data) return;
-
-    const locations = resolvePropertyLocations(activeQuery.data);
-
-    console.log("[PropertyMapPage] map response", {
-      total: locations.length,
-      locations: locations.map((property) => ({
-        propertyId: property.propertyId,
-        propertyCode: property.propertyCode,
-        propertyWorkflowStatus: property.workflowStatus,
-        propertyStatus: property.status,
-        latitude: property.latitude,
-        longitude: property.longitude,
-        hasIndicativeValuation: property.hasIndicativeValuation,
-        indicativeValuationCount: property.indicativeValuation?.length ?? 0,
-        indicativeValuation: property.indicativeValuation ?? [],
-      })),
-    });
-  }, [activeQuery.data]);
-
-  useEffect(() => {
-    if (process.env.NODE_ENV === "production") return;
-
-    console.log("[PropertyMapPage] filtered map properties", {
-      total: properties.length,
-      properties: properties.map((property) => ({
-        propertyId: property.propertyId,
-        propertyCode: property.propertyCode,
-        propertyWorkflowStatus: property.workflowStatus,
-        propertyStatus: property.status,
-        latitude: property.latitude,
-        longitude: property.longitude,
-        hasIndicativeValuation: property.hasIndicativeValuation,
-        indicativeValuationCount: property.indicativeValuation?.length ?? 0,
-        indicativeValuation: property.indicativeValuation ?? [],
-      })),
-    });
-  }, [properties]);
-
   const displayedProperties = useMemo(() => {
     if (searchPropertyIds === null) return properties;
     const propertyIds = new Set(searchPropertyIds);

@@ -31,6 +31,8 @@ interface DocumentsTabProps {
   onUpload: (field: any, files: FileList | null) => void;
   onRemove: (field: any) => void;
   onReset: () => void;
+  fieldErrors?: Partial<Record<string, string>>;
+  onClearFieldError?: (field: keyof PropertyFormData) => void;
 }
 
 export function DocumentsTab({
@@ -40,6 +42,8 @@ export function DocumentsTab({
   onUpload,
   onRemove,
   onReset,
+  fieldErrors,
+  onClearFieldError,
 }: DocumentsTabProps) {
   // Mock translation function if not using next-intl context directly
   const t = useTranslations("properties");
@@ -73,9 +77,15 @@ export function DocumentsTab({
             <Label htmlFor="titleDeedType">{t("titleDeedType")}  <span className="text-red-500">*</span></Label>
             <Select
               value={formData.titleDeedType}
-              onValueChange={(val) => handleInputChange("titleDeedType", val)}
+              onValueChange={(val) => {
+                handleInputChange("titleDeedType", val);
+                onClearFieldError?.("titleDeedType");
+              }}
             >
-              <SelectTrigger id="titleDeedType">
+              <SelectTrigger
+                id="titleDeedType"
+                className={fieldErrors?.titleDeedType ? "border-destructive" : ""}
+              >
                 <SelectValue placeholder={t("selectTitleDeedType")} />
               </SelectTrigger>
               <SelectContent>
@@ -85,6 +95,9 @@ export function DocumentsTab({
                 <SelectItem value="LMAP">LMAP</SelectItem>
               </SelectContent>
             </Select>
+            {fieldErrors?.titleDeedType ? (
+              <p className="text-sm text-destructive">{fieldErrors.titleDeedType}</p>
+            ) : null}
           </div>
 
           {/* Title Deed Number */}
@@ -108,8 +121,15 @@ export function DocumentsTab({
               type="number"
               placeholder={t("enterTotalSizeByTitleDeed")}
               value={formData.totalSizeByTitleDeed}
-              onChange={(e) => handleInputChange("totalSizeByTitleDeed", e.target.value)}
+              className={fieldErrors?.totalSizeByTitleDeed ? "border-destructive" : ""}
+              onChange={(e) => {
+                handleInputChange("totalSizeByTitleDeed", e.target.value);
+                onClearFieldError?.("totalSizeByTitleDeed");
+              }}
             />
+            {fieldErrors?.totalSizeByTitleDeed ? (
+              <p className="text-sm text-destructive">{fieldErrors.totalSizeByTitleDeed}</p>
+            ) : null}
           </div>
         </div>
 
