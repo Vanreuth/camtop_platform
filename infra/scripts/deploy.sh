@@ -95,7 +95,7 @@ if [ "$TARGET" = "all" ] || [ "$TARGET" = "backend" ]; then
 fi
 
 if [ "$TARGET" = "all" ] || [ "$TARGET" = "frontend" ]; then
-  check_health "property_valuation_frontend" "frontend" 18 || HEALTH_OK=false
+  check_health "property_valuation_frontend" "frontend" 24 || HEALTH_OK=false
 fi
 
 # ── 5. Summary ──────────────────────────────────────

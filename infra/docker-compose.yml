@@ -198,6 +198,7 @@ services:
       NODE_ENV: production
       TZ:       ${TZ:-Asia/Phnom_Penh}
       PORT:     "3000"   # override PORT=4000 that comes from infra/.env (backend port)
+      HOSTNAME: "0.0.0.0"
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
       NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY}
       NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID: ${NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID}
