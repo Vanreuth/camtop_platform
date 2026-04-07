@@ -112,6 +112,12 @@ function extractIndicativePdfVersion(...values: Array<string | null | undefined>
   return 0;
 }
 
+function toValidDate(value?: Date | string | null) {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function normalizeRequiredText(value?: string | null) {
   if (value === undefined || value === null) return undefined;
   const trimmed = value.trim();
@@ -381,6 +387,39 @@ async function refreshTotals(client: any, indicationId: number) {
   });
 }
 
+async function invalidateIndicativePdfCache(client: any, indicationId: number) {
+  await client.propertyIndicativeValuation.update({
+    where: { indicationId },
+    data: {
+      indicativePdfStorageKey: null,
+      indicativePdfFileName: null,
+      indicativePdfMimeType: null,
+      indicativePdfFileSize: null,
+      indicativePdfGeneratedAt: null,
+    },
+    select: { indicationId: true },
+  });
+}
+
+function getLatestIndicativePdfSourceUpdate(
+  valuation: {
+    property?: IndicativeValuationWithRelations["property"] | null;
+    components: IndicativeValuationWithRelations["components"];
+  },
+) {
+  const timestamps = [
+    toValidDate(valuation.property?.updatedAt ?? null),
+    toValidDate(valuation.property?.propertyPhotos?.updatedAt ?? null),
+    ...valuation.components.map((component: any) => toValidDate(component.updatedAt ?? null)),
+  ].filter((value): value is Date => value instanceof Date);
+
+  if (!timestamps.length) return null;
+
+  return timestamps.reduce((latest, current) =>
+    current.getTime() > latest.getTime() ? current : latest,
+  );
+}
+
 async function getSerializedValuation(indicationId: number) {
   const record = await repository.findWithComponents(indicationId);
   if (!record) {
@@ -550,6 +589,8 @@ function shouldRegenerateIndicativePdf(
   valuation: {
     indicativePdfStorageKey?: string | null;
     indicativePdfGeneratedAt?: Date | string | null;
+    property?: IndicativeValuationWithRelations["property"] | null;
+    components: IndicativeValuationWithRelations["components"];
   },
   refresh?: boolean
 ) {
@@ -557,9 +598,19 @@ function shouldRegenerateIndicativePdf(
   if (!valuation.indicativePdfStorageKey) return true;
   if (!valuation.indicativePdfGeneratedAt) return true;
 
-  const generatedAt = new Date(valuation.indicativePdfGeneratedAt);
+  const generatedAt = toValidDate(valuation.indicativePdfGeneratedAt);
 
-  if (Number.isNaN(generatedAt.getTime())) return true;
+  if (!generatedAt) return true;
+
+  const latestSourceUpdate = getLatestIndicativePdfSourceUpdate({
+    property: valuation.property ?? null,
+    components: valuation.components,
+  });
+
+  if (latestSourceUpdate && latestSourceUpdate.getTime() > generatedAt.getTime()) {
+    return true;
+  }
+
   return false;
 }
 
@@ -1591,6 +1642,7 @@ export const indicativeValuationService = {
       }
 
       await refreshTotals(tx, indicationId);
+      await invalidateIndicativePdfCache(tx, indicationId);
       await repository.auditLog(tx, {
         userId,
         action: "INDICATIVE_UPDATE_VALUATION",
@@ -1793,6 +1845,7 @@ export const indicativeValuationService = {
       });
 
       await refreshTotals(tx, indicationId);
+      await invalidateIndicativePdfCache(tx, indicationId);
       return created;
     });
 
@@ -1840,6 +1893,7 @@ export const indicativeValuationService = {
       });
 
       await refreshTotals(tx, indicationId);
+      await invalidateIndicativePdfCache(tx, indicationId);
       return updated;
     });
 
@@ -1856,6 +1910,7 @@ export const indicativeValuationService = {
     await prisma.$transaction(async (tx) => {
       await tx.indicativeValuationComponent.delete({ where: { id } });
       await refreshTotals(tx, indicationId);
+      await invalidateIndicativePdfCache(tx, indicationId);
     });
 
   },
