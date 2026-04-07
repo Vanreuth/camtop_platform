@@ -1,16 +1,30 @@
-import { Suspense } from "react";
 import LoginClient from "./LoginClient";
 
-export default function LoginPage() {
+type LoginPageSearchParams = {
+  redirect?: string | string[];
+  next?: string | string[];
+  registered?: string | string[];
+  verified?: string | string[];
+};
+
+function firstParam(value?: string | string[]) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<LoginPageSearchParams>;
+}) {
+  const resolvedSearchParams = await searchParams;
+
   return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-dvh items-center justify-center bg-slate-100 px-4">
-          <div className="h-64 w-full max-w-lg animate-pulse rounded-2xl border bg-white/80 shadow-sm" />
-        </div>
+    <LoginClient
+      initialNextUrl={
+        firstParam(resolvedSearchParams.redirect) ?? firstParam(resolvedSearchParams.next)
       }
-    >
-      <LoginClient />
-    </Suspense>
+      registered={firstParam(resolvedSearchParams.registered) === "true"}
+      verified={firstParam(resolvedSearchParams.verified) === "true"}
+    />
   );
 }

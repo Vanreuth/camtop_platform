@@ -4,14 +4,23 @@ import { AppSidebar } from "@/components/sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import React from "react";
 import { MainLayout } from "@/components/MainLayout";
-import { useAuthState } from "@/hooks/auth/AuthBootstrap";
+import { AuthProvider, useAuthState } from "@/hooks/auth/AuthBootstrap";
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  return (
+    <AuthProvider>
+      <DashboardShell>{children}</DashboardShell>
+    </AuthProvider>
+  );
+}
+
+function DashboardShell({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isReady } = useAuthState();
+
   if (!isReady) {
     return <div className="p-6">Loading...</div>;
   }

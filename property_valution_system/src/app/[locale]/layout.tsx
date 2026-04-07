@@ -5,8 +5,6 @@ import { getMessages } from "next-intl/server";
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "@/providers/QueryProviders";
 import { notFound } from "next/navigation";
-import { GoogleOAuthProvider } from "@react-oauth/google";
-import { AuthProvider } from "@/hooks/auth/AuthBootstrap";
 // english font
 const inter = Inter({
   subsets: ["latin"],
@@ -90,8 +88,6 @@ export default async function LocaleLayout({
 }) {
   const { locale } = await params;
 
-  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-
   // Validate that the incoming locale parameter is valid
   if (!locales.includes(locale)) {
     notFound();
@@ -106,19 +102,10 @@ export default async function LocaleLayout({
       className={`${inter.variable} ${hanuman.variable} antialiased bg-background font-sans`}
        suppressHydrationWarning={true}
       >
-      {googleClientId ? (
-        <GoogleOAuthProvider clientId={googleClientId}>
-          <Providers messages={messages} locale={locale}>
-            <AuthProvider>{children}</AuthProvider>
-            <Toaster richColors position="top-right" closeButton />
-          </Providers>
-        </GoogleOAuthProvider>
-      ) : (
         <Providers messages={messages} locale={locale}>
-          <AuthProvider>{children}</AuthProvider>
+          {children}
           <Toaster richColors position="top-right" closeButton />
         </Providers>
-      )}
       </body>
     </html>
   );

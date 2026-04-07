@@ -1,8 +1,6 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
-import { toast } from "sonner";
 import Image from "next/image";
 import {
   AlertCircle,
@@ -13,11 +11,11 @@ import {
   Mail,
   ShieldCheck,
 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { Link, useRouter } from "@/lib/navigation";
 import { useAuth } from "@/hooks/auth/useAuth";
-import { useAuthState } from "@/hooks/auth/AuthBootstrap";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -56,30 +54,25 @@ function safeInternalRedirect(raw: string | null | undefined, fallback = "/dashb
   return decoded;
 }
 
-export default function LoginClient() {
+type LoginClientProps = {
+  initialNextUrl?: string | null;
+  registered?: boolean;
+  verified?: boolean;
+};
+
+export default function LoginClient({
+  initialNextUrl,
+  registered = false,
+  verified = false,
+}: LoginClientProps) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const { isAuthenticated, isReady } = useAuthState();
 
   const [showPassword, setShowPassword] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const { login, isLoggingIn } = useAuth();
 
-  const nextUrl = safeInternalRedirect(
-    searchParams.get("redirect") || searchParams.get("next"),
-    "/dashboard"
-  );
-
-  const registered = searchParams.get("registered") === "true";
-  const verified = searchParams.get("verified") === "true";
-
-  useEffect(() => {
-    if (!isReady) return;
-    if (isAuthenticated) {
-      router.replace(nextUrl === "/login" ? "/dashboard" : nextUrl);
-    }
-  }, [isAuthenticated, isReady, nextUrl, router]);
+  const nextUrl = safeInternalRedirect(initialNextUrl, "/dashboard");
 
   const form = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
@@ -128,7 +121,7 @@ export default function LoginClient() {
           fill
           className="object-cover"
           priority
-          style={{ objectFit: "cover" }}
+          sizes="100vw"
         />
         <div className="absolute inset-0 bg-slate-950/35" />
       </div>
@@ -150,7 +143,7 @@ export default function LoginClient() {
             </div>
 
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-              <Image src="/camtop_logo.svg" alt="Camtop Logo" width={28} height={28} priority />
+              <Image src="/camtop_logo.svg" alt="Camtop Logo" width={28} height={28} />
             </div>
 
             <div className="space-y-1.5 text-center">

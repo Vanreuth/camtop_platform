@@ -138,7 +138,7 @@ export default function RegisterPage() {
           fill
           className="object-cover"
           priority
-          style={{ objectFit: "cover" }}
+          sizes="100vw"
         />
         <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px]" />
       </div>
@@ -152,7 +152,7 @@ export default function RegisterPage() {
           {/* Centered Header */}
           <div className="mb-4 space-y-1.5 text-center">
             <div className="mx-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 shadow-sm">
-              <Image src="/camtop_logo.svg" alt="Camtop Logo" width={24} height={24} priority />
+              <Image src="/camtop_logo.svg" alt="Camtop Logo" width={24} height={24} />
             </div>
             <div>
               <h1 className="text-xl font-extrabold tracking-tight text-slate-900 sm:text-2xl">

@@ -23,6 +23,7 @@ export const useProvinces = () => {
     queryKey: propertyAddressKeys.provinces(),
     queryFn: () => propertyAddressApi.getProvinces(),
     staleTime: 1000 * 60 * 60 * 24,
+    gcTime: 1000 * 60 * 60 * 24,
     retry: false,
   });
 };
@@ -35,6 +36,7 @@ export const useDistrictsByProvinceCode = (
     queryFn: () => propertyAddressApi.getDistrictsByProvinceCode(provinceCode!),
     enabled: !!provinceCode && provinceCode !== "",
     staleTime: 1000 * 60 * 60,
+    gcTime: 1000 * 60 * 60,
     retry: false,
   });
 };
@@ -47,6 +49,7 @@ export const useCommunesByDistrictCode = (
     queryFn: () => propertyAddressApi.getCommunesByDistrictCode(districtCode!),
     enabled: !!districtCode && districtCode !== "",
     staleTime: 1000 * 60 * 60,
+    gcTime: 1000 * 60 * 60,
     retry: false,
   });
 };
@@ -59,6 +62,7 @@ export const useVillagesByCommuneCode = (
     queryFn: () => propertyAddressApi.getVillagesByCommuneCode(communeCode!),
     enabled: !!communeCode && communeCode !== "",
     staleTime: 1000 * 60 * 60,
+    gcTime: 1000 * 60 * 60,
     retry: false,
   });
 };

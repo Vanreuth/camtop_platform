@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import dynamic from "next/dynamic";
+import { useState, type ComponentType } from "react";
 import { Provider } from "react-redux";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { store } from "@/store";
 import { FontProvider } from "./FontProvider";
 import { NextIntlClientProvider } from "next-intl";
@@ -14,6 +14,22 @@ interface ProvidersProps {
   messages: any;
   locale: string;
 }
+
+type ReactQueryDevtoolsProps = {
+  initialIsOpen?: boolean;
+};
+
+const ReactQueryDevtools = (
+  process.env.NODE_ENV === "development"
+    ? dynamic<ReactQueryDevtoolsProps>(
+        () =>
+          import("@tanstack/react-query-devtools").then(
+            (mod) => mod.ReactQueryDevtools
+          ),
+        { ssr: false }
+      )
+    : (() => null)
+) as ComponentType<ReactQueryDevtoolsProps>;
 
 export function Providers({ children, messages, locale }: ProvidersProps) {
   const [queryClient] = useState(
