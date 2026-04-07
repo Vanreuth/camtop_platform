@@ -81,6 +81,9 @@ check_health() {
   done
 
   log "❌  $NAME health check failed after $((MAX_ATTEMPTS * 10))s!"
+  docker inspect --format='{{range .State.Health.Log}}{{printf "%s exit=%d %s\n" .End .ExitCode .Output}}{{end}}' "$CONTAINER" 2>/dev/null | while IFS= read -r line; do
+    [ -n "$line" ] && log "   health: $line"
+  done
   docker compose logs --tail=30 "$NAME" 2>/dev/null || true
   return 1
 }
