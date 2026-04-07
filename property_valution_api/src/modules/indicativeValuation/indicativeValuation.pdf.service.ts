@@ -1,10 +1,9 @@
 import type { IndicativeValuationWithRelations } from "./indicativeValuation.repository";
 import {
-  computeChargeFeeRangeNumber,
-  normalizeFeePercent,
   resolveFeeAccessValueRangeNumber,
   sumComponentValueRangeNumber,
 } from "./indicativeValuation.calculation";
+import { FileUploadService } from "../../services/fileUpload.service";
 
 const PDFDocument = require("pdfkit");
 
@@ -76,8 +75,12 @@ const CONTENT = {
   tableWidth: PAGE.width - 144,
 };
 
+const STORAGE_PUBLIC_BASE_URL =
+  (process.env.CLOUDFLARE_R2_PUBLIC_URL || "").trim().replace(/\/+$/, "") ||
+  "https://cdn.camtopproperty.site";
 const INDICATIVE_PDF_PUBLIC_BASE_URL =
-  process.env.INDICATIVE_PDF_PUBLIC_BASE_URL?.trim() || "https://camtopproperty.site/indicative";
+  process.env.INDICATIVE_PDF_PUBLIC_BASE_URL?.trim() ||
+  `${STORAGE_PUBLIC_BASE_URL}/indicative`;
 
 const formatDate = (value?: Date | string | null) => {
   if (!value) return "-";
@@ -180,7 +183,14 @@ const getContactDetailLabel = (indication: IndicativeValuationWithRelations) => 
 };
 
 const fetchBinary = async (url?: string | null): Promise<Buffer | null> => {
-  if (!url || typeof fetch !== "function") return null;
+  if (!url) return null;
+
+  const storedAsset = await FileUploadService.downloadFileAsset(url);
+  if (storedAsset?.buffer) {
+    return storedAsset.buffer;
+  }
+
+  if (typeof fetch !== "function") return null;
 
   try {
     const response = await fetch(url);
@@ -540,18 +550,6 @@ export const createIndicativeValuationPdf = async (
     fallbackMaxAccessValue: totalMax,
     treatMaxMatchAsAuto: true,
   });
-  const feeRate =
-    (indication as any).feeRate != null ? normalizeFeePercent((indication as any).feeRate) : null;
-  const discount =
-    (indication as any).discount != null ? normalizeFeePercent((indication as any).discount) : null;
-  const chargeFeeRange = computeChargeFeeRangeNumber({
-    accessValue: (indication as any).accessValue,
-    fallbackMinAccessValue: totalMin,
-    fallbackMaxAccessValue: totalMax,
-    feeRate: (indication as any).feeRate,
-    discount: (indication as any).discount,
-    treatMaxMatchAsAuto: true,
-  });
   const referenceNo = indication.indicationNo || "-";
   const financerLabel = indication.instructedBy ?? "-";
   const purposeLabel = indication.intendedUse ?? "-";
@@ -590,9 +588,6 @@ export const createIndicativeValuationPdf = async (
     ["Instructed By", financerLabel],
     ["Contact Detail", contactDetailLabel],
     ["Access Value", formatCurrencyRange(accessValueRange.min, accessValueRange.max, indication.currency ?? "USD")],
-    ["Fee Rate", formatPercent(feeRate)],
-    ["Discount", formatPercent(discount)],
-    ["Fee Charge", formatCurrencyRange(chargeFeeRange.min, chargeFeeRange.max, indication.currency ?? "USD")],
     ["Purpose of Valuation", purposeLabel],
     ["Instructed Date", formatDate(indication.instructionDate)],
     ["Indicated Value Date", formatDate(indication.indicationDate)],

@@ -37,6 +37,10 @@ import {
   indicativePdfHelpers,
 } from "./indicativeValuation.pdf.service";
 import {
+  buildIndicativeTxtFileName,
+  buildIndicativeTxtTemplate,
+} from "./indicativeValuation.txt.service";
+import {
   indicativeValuationEmitter,
   IndicativeValuationEvents,
 } from "../../events/indicativeValuationEventEmitter";
@@ -754,6 +758,44 @@ export const indicativeValuationService = {
     };
   },
 
+  async getIndicativeTxtDocument(indicationId: number) {
+    const record = await repository.findWithComponents(indicationId);
+
+    if (!record) {
+      throw new NotFoundError(`Indicative valuation ${indicationId} not found`);
+    }
+
+    const valuation = serializeIndicativeValuation(record);
+    const content = buildIndicativeTxtTemplate({
+      code: valuation.indicationNo ?? valuation.valuationNo,
+      currency: valuation.currency ?? "USD",
+      estimatedMinValue:
+        valuation.totalIndicativeMinValue ?? valuation.minMarketValue ?? null,
+      estimatedMaxValue:
+        valuation.totalIndicativeMaxValue ?? valuation.maxMarketValue ?? null,
+      estimatedFeeCharge:
+        valuation.chargeFee ?? valuation.maxChargeFee ?? valuation.minChargeFee ?? null,
+      instructedBy: valuation.instructedBy ?? valuation.preparedFor ?? null,
+      creator: record.createdByUser,
+    });
+    const fileName = buildIndicativeTxtFileName(
+      valuation.indicationNo ?? valuation.valuationNo ?? `indicative-${indicationId}`,
+    );
+
+    return {
+      success: true,
+      message: "Indicative valuation TXT template is ready",
+      data: {
+        indicationId,
+        valuationId: indicationId,
+        indicationNo: valuation.indicationNo ?? valuation.valuationNo ?? null,
+        fileName,
+        mimeType: "text/plain; charset=utf-8",
+        content,
+      },
+    };
+  },
+
   async createIndicativeValuation(
     dto: CreateIndicativeValuationDTO,
     createdBy: number,
@@ -1218,7 +1260,8 @@ export const indicativeValuationService = {
     indicationId: number,
     dto: UpdateIndicativeValuationDTO,
     userId: number,
-    userHierarchyLevel: number
+    userHierarchyLevel: number,
+    files?: FileField
   ) {
     const existing: IndicativeValuationWithRelations | null =
       await repository.findWithComponents(indicationId);
@@ -1274,10 +1317,45 @@ export const indicativeValuationService = {
       dto.componentType ??
       (primaryComponent?.componentType as IndicativeComponentType | undefined) ??
       IndicativeComponentType.LAND;
+    const propertyPhotoPayload = dto.property?.propertyPhotos;
+    const deletedImages = [
+      propertyPhotoPayload?.frontSide === null ? "frontSide" : null,
+      propertyPhotoPayload?.inside === null ? "inside" : null,
+      propertyPhotoPayload?.leftSide === null ? "leftSide" : null,
+      propertyPhotoPayload?.rightSide === null ? "rightSide" : null,
+      propertyPhotoPayload?.opposite === null ? "opposite" : null,
+    ].filter((value): value is string => Boolean(value));
+    const existingPhotosForUpload = existing.property?.propertyPhotos
+      ? {
+          frontSide: existing.property.propertyPhotos.frontSide,
+          inside: existing.property.propertyPhotos.inside,
+          leftSide: existing.property.propertyPhotos.leftSide,
+          rightSide: existing.property.propertyPhotos.rightSide,
+          opposite: existing.property.propertyPhotos.opposite,
+          gallery: Array.isArray(existing.property.propertyPhotos.gallery)
+            ? existing.property.propertyPhotos.gallery.filter(
+                (value): value is string => typeof value === "string"
+              )
+            : undefined,
+        }
+      : null;
+    const photoUrls =
+      files || deletedImages.length
+        ? await propertyUploadService.updatePhotos({
+            files,
+            existingProperty: {
+              propertyPhotos: existingPhotosForUpload,
+              titleDocument: existing.property?.titleDocument ?? null,
+            },
+            deletedImages,
+          })
+        : {};
+    const hasPhotoUpdates = Object.keys(photoUrls).length > 0;
 
     await prisma.$transaction(async (tx) => {
-      if (dto.property) {
-        const propertyData = dto.property;
+      if (dto.property || hasPhotoUpdates) {
+        const propertyData =
+          dto.property ?? ({} as NonNullable<UpdateIndicativeValuationDTO["property"]>);
 
         await tx.property.update({
           where: { propertyId },
@@ -1359,36 +1437,51 @@ export const indicativeValuationService = {
                   },
                 }
               : {}),
-            ...(propertyData.propertyPhotos
+            ...(propertyData.propertyPhotos || hasPhotoUpdates
               ? {
                   propertyPhotos: {
                     upsert: {
                       create: {
-                        frontSide: propertyData.propertyPhotos.frontSide ?? null,
-                        inside: propertyData.propertyPhotos.inside ?? null,
-                        leftSide: propertyData.propertyPhotos.leftSide ?? null,
-                        rightSide: propertyData.propertyPhotos.rightSide ?? null,
-                        opposite: propertyData.propertyPhotos.opposite ?? null,
-                        gallery: normalizeGalleryJson(propertyData.propertyPhotos.gallery),
+                        frontSide: photoUrls.frontSide ?? propertyData.propertyPhotos?.frontSide ?? null,
+                        inside: photoUrls.inside ?? propertyData.propertyPhotos?.inside ?? null,
+                        leftSide: photoUrls.leftSide ?? propertyData.propertyPhotos?.leftSide ?? null,
+                        rightSide: photoUrls.rightSide ?? propertyData.propertyPhotos?.rightSide ?? null,
+                        opposite: photoUrls.opposite ?? propertyData.propertyPhotos?.opposite ?? null,
+                        gallery:
+                          photoUrls.gallery !== undefined
+                            ? normalizeGalleryJson(photoUrls.gallery)
+                            : normalizeGalleryJson(propertyData.propertyPhotos?.gallery),
                       } as any,
                       update: {
-                        ...(propertyData.propertyPhotos.frontSide !== undefined
-                          ? { frontSide: propertyData.propertyPhotos.frontSide }
+                        ...(photoUrls.frontSide !== undefined
+                          ? { frontSide: photoUrls.frontSide }
+                          : propertyData.propertyPhotos?.frontSide !== undefined
+                            ? { frontSide: propertyData.propertyPhotos.frontSide }
                           : {}),
-                        ...(propertyData.propertyPhotos.inside !== undefined
-                          ? { inside: propertyData.propertyPhotos.inside }
+                        ...(photoUrls.inside !== undefined
+                          ? { inside: photoUrls.inside }
+                          : propertyData.propertyPhotos?.inside !== undefined
+                            ? { inside: propertyData.propertyPhotos.inside }
                           : {}),
-                        ...(propertyData.propertyPhotos.leftSide !== undefined
-                          ? { leftSide: propertyData.propertyPhotos.leftSide }
+                        ...(photoUrls.leftSide !== undefined
+                          ? { leftSide: photoUrls.leftSide }
+                          : propertyData.propertyPhotos?.leftSide !== undefined
+                            ? { leftSide: propertyData.propertyPhotos.leftSide }
                           : {}),
-                        ...(propertyData.propertyPhotos.rightSide !== undefined
-                          ? { rightSide: propertyData.propertyPhotos.rightSide }
+                        ...(photoUrls.rightSide !== undefined
+                          ? { rightSide: photoUrls.rightSide }
+                          : propertyData.propertyPhotos?.rightSide !== undefined
+                            ? { rightSide: propertyData.propertyPhotos.rightSide }
                           : {}),
-                        ...(propertyData.propertyPhotos.opposite !== undefined
-                          ? { opposite: propertyData.propertyPhotos.opposite }
+                        ...(photoUrls.opposite !== undefined
+                          ? { opposite: photoUrls.opposite }
+                          : propertyData.propertyPhotos?.opposite !== undefined
+                            ? { opposite: propertyData.propertyPhotos.opposite }
                           : {}),
-                        ...(propertyData.propertyPhotos.gallery !== undefined
-                          ? { gallery: normalizeGalleryJson(propertyData.propertyPhotos.gallery) }
+                        ...(photoUrls.gallery !== undefined
+                          ? { gallery: normalizeGalleryJson(photoUrls.gallery) }
+                          : propertyData.propertyPhotos?.gallery !== undefined
+                            ? { gallery: normalizeGalleryJson(propertyData.propertyPhotos.gallery) }
                           : {}),
                       },
                     },

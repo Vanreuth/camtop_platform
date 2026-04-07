@@ -1074,8 +1074,8 @@ export default function EditPropertyPage() {
         currentUseId: property.currentUseId?.toString() || "",
         status: property.status || "",
         workflowStatus: property.workflowStatus || "",
-        // Auto-clean rejection reasons from description for REJECTED properties
-        description: property.status === "REJECTED" 
+        // Auto-clean rejection reasons from description for rejected workflow items
+        description: property.workflowStatus === "REJECTED" 
           ? cleanRejectionReasons(property.description || "")
           : property.description || "",
         provinceId: getAddressEntityCode(property.propertyAddress?.province) || "",
@@ -2013,16 +2013,17 @@ export default function EditPropertyPage() {
         String(Number(formData.currentUseId))
       );
       
-      // ===== Auto-convert REJECTED to DRAFT =====
-      // When editing a REJECTED property:
-      // - Don't send status field, let backend auto-convert REJECTED → DRAFT
-      // - Backend will handle the status transition automatically
-      // - This matches the propertyValuation edit page behavior
-      if (property?.status !== "REJECTED") {
+      // Keep business status in sync when the user is allowed to edit it.
+      if (formData.status) {
         formDataToSend.append("status", formData.status);
       }
-      // Note: For REJECTED properties, status field is intentionally omitted
-      // Backend logic: if (existing.status === REJECTED && !data.status) { newStatus = DRAFT }
+
+      // Admins/managers can explicitly update workflow status.
+      // Regular users omit it so the backend can keep the current workflow
+      // or auto-return rejected records to DRAFT when appropriate.
+      if (canSelectWorkflowStatus && formData.workflowStatus) {
+        formDataToSend.append("workflowStatus", formData.workflowStatus);
+      }
 
       // ✅ IMPORTANT: Always send description to allow updates/clearing
       // Rejection reasons are pre-cleaned during form load

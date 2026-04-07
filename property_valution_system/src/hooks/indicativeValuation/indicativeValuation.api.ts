@@ -230,9 +230,13 @@ export const indicativeValuationApi = {
 
   updateIndicativeValuation: async (
     id: number,
-    data: UpdateIndicativeValuationInput,
+    data: UpdateIndicativeValuationInput | FormData,
   ): Promise<ApiResponseWithMessage<IndicativeValuation>> => {
-    const response = await api.patch(`/property-indicativeValuation/${id}`, data);
+    const config =
+      data instanceof FormData
+        ? { headers: { "Content-Type": "multipart/form-data" } }
+        : undefined;
+    const response = await api.patch(`/property-indicativeValuation/${id}`, data, config);
     const payload = unwrap<RawIndicativeValuation>(response.data);
 
     return {
@@ -343,6 +347,23 @@ export const indicativeValuationApi = {
     return {
       ...payload,
       _responseMessage: getApiSuccessMessage(response.data),
+    };
+  },
+
+  exportIndicativeValuationTxt: async (id: number) => {
+    const response = await api.get(`/property-indicativeValuation/${id}/export/txt`, {
+      responseType: "blob",
+    });
+    const contentDisposition = response.headers["content-disposition"] as
+      | string
+      | undefined;
+
+    return {
+      blob: response.data as Blob,
+      fileName: getFileNameFromContentDisposition(
+        contentDisposition,
+        `indicative-valuation-${id}.txt`,
+      ),
     };
   },
 

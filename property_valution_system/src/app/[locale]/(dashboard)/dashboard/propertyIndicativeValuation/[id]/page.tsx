@@ -35,6 +35,7 @@ import { useAuth } from "@/hooks/auth/useAuth";
 import { usePropertyLocationAnalysis } from "@/hooks/property/useProperty";
 import {
   useExportIndicativeValuationPdf,
+  useExportIndicativeValuationTxt,
   useApproveIndicativeValuation,
   useIndicativeValuation,
   useRejectIndicativeValuation,
@@ -160,6 +161,7 @@ export default function PropertyIndicativeValuationDetailPage() {
   const approveMutation = useApproveIndicativeValuation();
   const rejectMutation = useRejectIndicativeValuation();
   const exportPdfMutation = useExportIndicativeValuationPdf();
+  const exportTxtMutation = useExportIndicativeValuationTxt();
 
   const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
   const [approveDialogOpen, setApproveDialogOpen] = useState(false);
@@ -362,6 +364,25 @@ export default function PropertyIndicativeValuationDetailPage() {
     }
   }, [canGeneratePdf, exportPdfMutation, t, valuation]);
 
+  const handleDownloadTxt = useCallback(async () => {
+    if (!valuation) return;
+
+    try {
+      const { blob, fileName } = await exportTxtMutation.mutateAsync(valuation.valuationId);
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName || `indicative-valuation-${valuation.valuationId}.txt`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success("TXT template downloaded");
+    } catch {
+      // Mutation toast already surfaces the API error.
+    }
+  }, [exportTxtMutation, valuation]);
+
   return (
     <PermissionGuard
       maxHierarchyLevel={3}
@@ -441,9 +462,18 @@ export default function PropertyIndicativeValuationDetailPage() {
                   <div className="flex flex-wrap gap-2">
                     <Button
                       variant="outline"
+                      onClick={() => void handleDownloadTxt()}
+                      disabled={exportTxtMutation.isPending || !valuation}
+                    >
+                      <FileText className="mr-2 h-4 w-4" />
+                      Download TXT
+                    </Button>
+                    <Button
+                      variant="outline"
                       onClick={() => void handleViewPdf()}
                       disabled={
                         exportPdfMutation.isPending ||
+                        exportTxtMutation.isPending ||
                         !valuation ||
                         (!hasStoredPdf && !canGeneratePdf)
                       }
@@ -455,7 +485,12 @@ export default function PropertyIndicativeValuationDetailPage() {
                       <Button
                         variant="outline"
                         onClick={() => void handleRegeneratePdf()}
-                        disabled={exportPdfMutation.isPending || !valuation || !canGeneratePdf}
+                        disabled={
+                          exportPdfMutation.isPending ||
+                          exportTxtMutation.isPending ||
+                          !valuation ||
+                          !canGeneratePdf
+                        }
                       >
                         <FileText className="mr-2 h-4 w-4" />
                         {t("actions.regeneratePdf")}

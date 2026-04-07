@@ -137,6 +137,26 @@ export const exportIndicativeValuationPdf = expressAsyncHandler(
   }
 );
 
+/** GET /property-indicativeValuation/:indicationId/export/txt */
+export const exportIndicativeValuationTxt = expressAsyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const indicationId = Number(req.params.indicationId);
+
+    if (Number.isNaN(indicationId)) {
+      throw new BadRequestError("Invalid indication ID");
+    }
+
+    const result = await indicativeValuationService.getIndicativeTxtDocument(indicationId);
+
+    res.setHeader("Content-Type", result.data.mimeType);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${result.data.fileName}"`
+    );
+    res.status(200).send(result.data.content);
+  }
+);
+
 /** PATCH /property-indicativeValuation/:indicationId */
 export const updateIndicativeValuation = expressAsyncHandler(
   async (req: AuthRequest, res: Response) => {
@@ -146,6 +166,7 @@ export const updateIndicativeValuation = expressAsyncHandler(
 
     const indicationId = Number(req.params.indicationId);
     const dto = updateIndicativeValuationSchema.parse(req.body) as UpdateIndicativeValuationDTO;
+    const files = (req.files as FileField | undefined) ?? undefined;
     const userHierarchyLevel = req.user.roles?.length
       ? Math.min(...req.user.roles.map((role: any) => role.hierarchyLevel))
       : 99;
@@ -154,7 +175,8 @@ export const updateIndicativeValuation = expressAsyncHandler(
       indicationId,
       dto,
       req.user.id,
-      userHierarchyLevel
+      userHierarchyLevel,
+      files
     );
 
     successResponse(res, 200, result.data, result.message);

@@ -63,6 +63,11 @@ const parseJsonFields = (req: Request, res: Response, next: NextFunction) => {
         continue;
       }
 
+      if (value === "null") {
+        req.body[key] = null;
+        continue;
+      }
+
       // Convert numeric strings ONLY for fields that are NOT in stringOnlyFields
       if (!stringOnlyFields.includes(key) && !isNaN(Number(value)) && value !== "") {
         req.body[key] = Number(value);

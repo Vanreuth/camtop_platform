@@ -255,7 +255,7 @@ export const BasicInfoTab: React.FC<BasicInfoTabProps> = ({
                 {t('workflowStatus') || 'Workflow Status'}
               </Label>
               <Select 
-                value={formData.workflowStatus || 'DRAFT'} 
+                value={formData.workflowStatus || undefined} 
                 onValueChange={(value) => onInputChange('workflowStatus', value)}
                 disabled={!canSelectWorkflowStatus}
               >
@@ -301,7 +301,7 @@ export const BasicInfoTab: React.FC<BasicInfoTabProps> = ({
               {!canSelectWorkflowStatus ? (
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
                   <span className="inline-block w-1 h-1 rounded-full bg-muted-foreground"></span>
-                  Workflow status is locked to &apos;Draft&apos; for regular users.
+                  Workflow status is locked for regular users.
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground flex items-center gap-1">

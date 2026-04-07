@@ -16,6 +16,7 @@ const auditUserSelect = {
   username: true,
   firstName: true,
   lastName: true,
+  phone: true,
 } satisfies Prisma.UserSelect;
 
 const propertyInclude = {

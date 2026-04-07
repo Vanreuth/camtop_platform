@@ -17,12 +17,80 @@ const buildObjectKey = (folder: string, filename: string) => {
 };
 
 const resolveObjectKey = (keyOrUrl: string) => {
-  const publicUrl = process.env.CLOUDFLARE_R2_PUBLIC_URL || "";
-  if (!publicUrl) {
-    return keyOrUrl;
+  const normalizedValue = keyOrUrl.trim();
+  if (!normalizedValue) {
+    return "";
   }
 
-  return keyOrUrl.replace(`${publicUrl}/`, "");
+  const publicUrl = process.env.CLOUDFLARE_R2_PUBLIC_URL || "";
+  if (!publicUrl) {
+    try {
+      return decodeURIComponent(new URL(normalizedValue).pathname.replace(/^\/+/, ""));
+    } catch {
+      return normalizedValue;
+    }
+  }
+
+  if (normalizedValue.startsWith(`${publicUrl}/`)) {
+    return normalizedValue.replace(`${publicUrl}/`, "");
+  }
+
+  try {
+    return decodeURIComponent(new URL(normalizedValue).pathname.replace(/^\/+/, ""));
+  } catch {
+    return normalizedValue;
+  }
+};
+
+const toBuffer = async (body: unknown): Promise<Buffer | null> => {
+  if (!body) {
+    return null;
+  }
+
+  if (
+    "transformToByteArray" in Object(body) &&
+    typeof (body as { transformToByteArray?: unknown }).transformToByteArray ===
+      "function"
+  ) {
+    const bytes = await (
+      body as { transformToByteArray: () => Promise<Uint8Array> }
+    ).transformToByteArray();
+    return Buffer.from(bytes);
+  }
+
+  if (
+    "arrayBuffer" in Object(body) &&
+    typeof (body as { arrayBuffer?: unknown }).arrayBuffer === "function"
+  ) {
+    const arrayBuffer = await (
+      body as { arrayBuffer: () => Promise<ArrayBuffer> }
+    ).arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  }
+
+  if (!(Symbol.asyncIterator in Object(body))) {
+    return null;
+  }
+
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of body as AsyncIterable<unknown>) {
+    if (Buffer.isBuffer(chunk)) {
+      chunks.push(chunk);
+      continue;
+    }
+
+    if (chunk instanceof Uint8Array) {
+      chunks.push(Buffer.from(chunk));
+      continue;
+    }
+
+    if (typeof chunk === "string") {
+      chunks.push(Buffer.from(chunk));
+    }
+  }
+
+  return chunks.length ? Buffer.concat(chunks) : null;
 };
 
 const uploadFile = async (
@@ -89,6 +157,36 @@ const uploadPdf = async (
       : "application/pdf";
 
   return uploadPdfBuffer(file.buffer, key, contentType);
+};
+
+const downloadFileAsset = async (
+  keyOrUrl: string
+): Promise<{ buffer: Buffer; contentType: string | null } | null> => {
+  const key = resolveObjectKey(keyOrUrl);
+  if (!key) {
+    return null;
+  }
+
+  try {
+    const response = await s3.send(
+      new GetObjectCommand({
+        Bucket: process.env.CLOUDFLARE_BUCKET_NAME!,
+        Key: key,
+      })
+    );
+
+    const buffer = await toBuffer(response.Body);
+    if (!buffer) {
+      return null;
+    }
+
+    return {
+      buffer,
+      contentType: response.ContentType ?? null,
+    };
+  } catch {
+    return null;
+  }
 };
 
 const signedDownloadUrl = async (
@@ -244,6 +342,7 @@ export const FileUploadService = {
   uploadMultipleFiles,
   uploadPdfBuffer,
   uploadPdf,
+  downloadFileAsset,
   signedDownloadUrl,
   signedViewUrl,
   deleteFile,

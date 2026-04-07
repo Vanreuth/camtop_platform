@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { NotFoundError } from "../../common/errors/notFound.error";
+import { FileUploadService } from "../../services/fileUpload.service";
 import type { IndicativeValuationFiltersDTO } from "./indicativeValuation.dto";
 import {
   computeChargeFeeRangeNumber,
@@ -196,18 +197,39 @@ const addLabelValueRow = (
   worksheet.getRow(rowNumber).height = 22;
 };
 
+const resolveImageExtension = (
+  contentType?: string | null,
+  url?: string | null,
+): "png" | "jpeg" => {
+  const normalizedContentType = contentType?.toLowerCase() ?? "";
+  const normalizedUrl = url?.toLowerCase() ?? "";
+
+  return normalizedContentType.includes("png") || normalizedUrl.includes(".png")
+    ? "png"
+    : "jpeg";
+};
+
 const buildImagePayload = async (
   url?: string | null,
 ): Promise<{ base64: string; extension: "png" | "jpeg" } | null> => {
-  if (!url || typeof fetch !== "function") return null;
+  if (!url) return null;
+
+  const storedAsset = await FileUploadService.downloadFileAsset(url);
+  if (storedAsset?.buffer) {
+    const extension = resolveImageExtension(storedAsset.contentType, url);
+    return {
+      base64: `data:image/${extension};base64,${storedAsset.buffer.toString("base64")}`,
+      extension,
+    };
+  }
+
+  if (typeof fetch !== "function") return null;
 
   try {
     const response = await fetch(url);
     if (!response.ok) return null;
 
-    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-    const extension: "png" | "jpeg" =
-      contentType.includes("png") || url.toLowerCase().includes(".png") ? "png" : "jpeg";
+    const extension = resolveImageExtension(response.headers.get("content-type"), url);
 
     const arrayBuffer = await response.arrayBuffer();
     const base64 = `data:image/${extension};base64,${Buffer.from(arrayBuffer).toString("base64")}`;

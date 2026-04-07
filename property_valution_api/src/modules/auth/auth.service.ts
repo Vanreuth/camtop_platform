@@ -48,6 +48,7 @@ export class AuthService {
       lastName: user.lastName,
       firstName: user.firstName,
       username: user.username,
+      phone: user.phone,
       role: user.roles?.[0]?.role?.roleName || "USER",
       profilePicture: user.profilePicture,
       status: user.status,

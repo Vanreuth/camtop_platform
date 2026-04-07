@@ -23,6 +23,7 @@ import {
   Lock,
   User,
   Mail,
+  Phone,
   Shield,
   Camera,
   Loader2,
@@ -428,6 +429,13 @@ export default function SettingsAccountPage() {
                 <p className="text-base font-medium">{user.email}</p>
               </div>
               <div className="space-y-1">
+                <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <Phone className="h-4 w-4" />
+                  Phone
+                </div>
+                <p className="text-base font-medium">{user.phone || "Not provided"}</p>
+              </div>
+              <div className="space-y-1">
                 <label className="text-sm font-medium text-muted-foreground">
                   Full Name
                 </label>
@@ -460,14 +468,12 @@ export default function SettingsAccountPage() {
                   )}
                 </div>
               </div>
-              {user.bio && (
-                <div className="space-y-1 md:col-span-2">
-                  <label className="text-sm font-medium text-muted-foreground">
-                    Bio
-                  </label>
-                  <p className="text-base">{user.bio}</p>
-                </div>
-              )}
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-sm font-medium text-muted-foreground">
+                  Bio
+                </label>
+                <p className="text-base">{user.bio || "No bio added yet."}</p>
+              </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium text-muted-foreground">
                   Account Status

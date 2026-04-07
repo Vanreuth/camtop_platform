@@ -70,7 +70,13 @@ export function useUpdateIndicativeValuation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, data }: { id: number; data: UpdateIndicativeValuationInput }) =>
+    mutationFn: ({
+      id,
+      data,
+    }: {
+      id: number;
+      data: UpdateIndicativeValuationInput | FormData;
+    }) =>
       indicativeValuationApi.updateIndicativeValuation(id, data),
     onSuccess: (response, variables) => {
       queryClient.invalidateQueries({ queryKey: indicativeValuationKeys.lists() });
@@ -134,6 +140,20 @@ export function useExportIndicativeValuationPdf() {
     onError: (error) => {
       toast.error(
         getApiErrorMessage(error, "Failed to export indicative valuation PDF"),
+        {
+          description: getApiErrorDescription(error),
+        },
+      );
+    },
+  });
+}
+
+export function useExportIndicativeValuationTxt() {
+  return useMutation({
+    mutationFn: (id: number) => indicativeValuationApi.exportIndicativeValuationTxt(id),
+    onError: (error) => {
+      toast.error(
+        getApiErrorMessage(error, "Failed to export indicative valuation TXT"),
         {
           description: getApiErrorDescription(error),
         },

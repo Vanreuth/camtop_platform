@@ -837,12 +837,13 @@ export class PropertyService {
     );
   }
   
-  // Auto-convert REJECTED to DRAFT when editing (like propertyValuation)
+  // Auto-convert REJECTED workflow back to DRAFT for regular-user edits.
+  // Admins/managers can still explicitly choose and submit a workflow status.
   let newWorkflowStatus: WorkflowStatus | undefined = data.workflowStatus;
   if (
+    !isAdminOrManager &&
     existing.workflowStatus === WorkflowStatus.REJECTED &&
-    newWorkflowStatus === undefined &&
-    !data.status
+    newWorkflowStatus === undefined
   ) {
     newWorkflowStatus = WorkflowStatus.DRAFT;
   }

@@ -77,6 +77,15 @@ function syncAuthTokens(payload: unknown) {
 }
 
 export const authApi = {
+  normalizeProfileUpdate: (profile: Partial<UpdateProfileInput>) => {
+    const normalizedEntries = Object.entries(profile).filter(([, value]) => {
+      if (value === undefined || value === null) return false;
+      if (typeof value === "string" && value.trim() === "") return false;
+      return true;
+    });
+
+    return Object.fromEntries(normalizedEntries) as Partial<UpdateProfileInput>;
+  },
 
   refresh: async (): Promise<{ accessToken?: string; refreshToken?: string }> => {
     const { data } = await api.post("/auth/refresh", {});
@@ -124,9 +133,10 @@ export const authApi = {
 
   updateProfile: async (profile: Partial<UpdateProfileInput>): Promise<AuthPayload> => {
     const profilePicture = (profile as any).profilePicture;
+    const normalizedProfile = authApi.normalizeProfileUpdate(profile);
 
     if (profilePicture instanceof File) {
-      const { profilePicture: _, ...rest } = profile as any;
+      const { profilePicture: _, ...rest } = normalizedProfile as any;
       const fd = new FormData();
       fd.append("profile", JSON.stringify(rest));
       fd.append("profilePicture", profilePicture);
@@ -143,7 +153,7 @@ export const authApi = {
     }
 
     // Remove profilePicture field if it's not a file
-    const { profilePicture: _, ...profileData } = profile as any;
+    const { profilePicture: _, ...profileData } = normalizedProfile as any;
     const { data } = await api.patch("/auth/me/profile", { profile: profileData });
     return unwrap<AuthPayload>(data);
   },

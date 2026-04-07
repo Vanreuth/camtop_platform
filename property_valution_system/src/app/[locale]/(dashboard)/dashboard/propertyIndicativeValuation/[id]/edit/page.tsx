@@ -188,6 +188,11 @@ type ConfirmDialogState = {
   onConfirm: () => void;
 };
 type ComponentDraft = IndicativeComponentDraftValue;
+const INDICATIVE_PHOTO_FIELDS = ["frontSide", "inside"] as const;
+type IndicativePhotoField = (typeof INDICATIVE_PHOTO_FIELDS)[number];
+type IndicativePhotoFiles = Record<IndicativePhotoField, File | null>;
+type IndicativePhotoPreviewState = Record<IndicativePhotoField, string>;
+type IndicativePhotoRemovalState = Record<IndicativePhotoField, boolean>;
 type NewPropertyDraft = {
   propertyTypeId: string;
   propertySubtypeId: string;
@@ -375,6 +380,67 @@ const defaultNewPropertyDraft = (): NewPropertyDraft => ({
   geolocationLink: "",
 });
 
+const createEmptyIndicativePhotoFiles = (): IndicativePhotoFiles => ({
+  frontSide: null,
+  inside: null,
+});
+
+const createEmptyIndicativePhotoPreviews = (): IndicativePhotoPreviewState => ({
+  frontSide: "",
+  inside: "",
+});
+
+const createEmptyIndicativePhotoRemovals = (): IndicativePhotoRemovalState => ({
+  frontSide: false,
+  inside: false,
+});
+
+const buildIndicativePhotoPreviews = (valuation?: any | null): IndicativePhotoPreviewState => ({
+  frontSide: valuation?.property?.propertyPhotos?.frontSide ?? "",
+  inside: valuation?.property?.propertyPhotos?.inside ?? "",
+});
+
+const appendFormDataValue = (formData: FormData, key: string, value: unknown) => {
+  if (value === undefined) return;
+
+  if (value === null) {
+    formData.append(key, "null");
+    return;
+  }
+
+  if (value instanceof Date) {
+    formData.append(key, value.toISOString());
+    return;
+  }
+
+  if (typeof value === "object") {
+    formData.append(key, JSON.stringify(value));
+    return;
+  }
+
+  formData.append(key, String(value));
+};
+
+const buildIndicativeUpdateFormData = (
+  payload: Record<string, unknown>,
+  photoFiles: IndicativePhotoFiles,
+) => {
+  const formData = new FormData();
+
+  Object.entries(payload).forEach(([key, value]) => {
+    appendFormDataValue(formData, key, value);
+  });
+
+  INDICATIVE_PHOTO_FIELDS.forEach((field) => {
+    const file = photoFiles[field];
+    if (file) {
+      formData.append(field, file);
+    }
+  });
+
+  return formData;
+};
+
 const getAddressCodeValue = (
   nested?: {
     code?: string | number | null;
@@ -466,6 +532,15 @@ export default function EditPropertyIndicativeValuationPage() {
   const [addressCodes, setAddressCodes] = useState<AddressCodes>(DEFAULT_ADDRESS_CODES);
   const [resolvedAddressItems, setResolvedAddressItems] =
     useState<ResolvedAddressHierarchyItems>(EMPTY_RESOLVED_ADDRESS_ITEMS);
+  const [photoFiles, setPhotoFiles] = useState<IndicativePhotoFiles>(
+    createEmptyIndicativePhotoFiles,
+  );
+  const [photoPreviews, setPhotoPreviews] = useState<IndicativePhotoPreviewState>(
+    createEmptyIndicativePhotoPreviews,
+  );
+  const [photoRemovals, setPhotoRemovals] = useState<IndicativePhotoRemovalState>(
+    createEmptyIndicativePhotoRemovals,
+  );
   const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
   const hadPolygonDrawnRef = useRef(false);
   const lastResolvedAddressKeyRef = useRef("");
@@ -473,6 +548,10 @@ export default function EditPropertyIndicativeValuationPage() {
   const preserveTypedDetectedAddressRef = useRef(false);
   const resolvedCanonicalAddressRef = useRef("");
   const hasAddressResolutionInteractionRef = useRef(false);
+  const photoObjectUrlsRef = useRef<Record<IndicativePhotoField, string | null>>({
+    frontSide: null,
+    inside: null,
+  });
   const addressResolutionSourceRef = useRef<"coordinates" | "formattedAddress">(
     "coordinates"
   );
@@ -522,6 +601,32 @@ export default function EditPropertyIndicativeValuationPage() {
     () => normalizeIntendedUseValue(valuation?.intendedUse ?? valuation?.purposeOfValuation),
     [valuation?.intendedUse, valuation?.purposeOfValuation],
   );
+
+  const resetIndicativePhotoState = useCallback((nextValuation?: any | null) => {
+    INDICATIVE_PHOTO_FIELDS.forEach((field) => {
+      const objectUrl = photoObjectUrlsRef.current[field];
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        photoObjectUrlsRef.current[field] = null;
+      }
+    });
+
+    setPhotoFiles(createEmptyIndicativePhotoFiles());
+    setPhotoRemovals(createEmptyIndicativePhotoRemovals());
+    setPhotoPreviews(buildIndicativePhotoPreviews(nextValuation));
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      INDICATIVE_PHOTO_FIELDS.forEach((field) => {
+        const objectUrl = photoObjectUrlsRef.current[field];
+        if (objectUrl) {
+          URL.revokeObjectURL(objectUrl);
+          photoObjectUrlsRef.current[field] = null;
+        }
+      });
+    };
+  }, []);
 
   useEffect(() => {
     if (!valuation) return;
@@ -587,7 +692,15 @@ export default function EditPropertyIndicativeValuationPage() {
       commune: toResolvedAddressItem(valuation.property?.propertyAddress?.commune),
       village: toResolvedAddressItem(valuation.property?.propertyAddress?.village),
     });
-  }, [form, normalizedInitialInstructedBy, normalizedInitialIntendedUse, user?.id, valuation]);
+    resetIndicativePhotoState(valuation);
+  }, [
+    form,
+    normalizedInitialInstructedBy,
+    normalizedInitialIntendedUse,
+    resetIndicativePhotoState,
+    user?.id,
+    valuation,
+  ]);
 
   useEffect(() => {
     if (!normalizedInitialInstructedBy) return;
@@ -770,16 +883,66 @@ export default function EditPropertyIndicativeValuationPage() {
 
   const photoEntries = [
     {
-      key: "frontSide",
+      key: "frontSide" as const,
       label: t("fields.frontViewPhoto"),
-      value: valuation?.property?.propertyPhotos?.frontSide,
+      value: photoPreviews.frontSide,
+      selectedFileName: photoFiles.frontSide?.name,
+      markedForRemoval: photoRemovals.frontSide,
     },
     {
-      key: "inside",
+      key: "inside" as const,
       label: t("fields.insideViewPhoto"),
-      value: valuation?.property?.propertyPhotos?.inside,
+      value: photoPreviews.inside,
+      selectedFileName: photoFiles.inside?.name,
+      markedForRemoval: photoRemovals.inside,
     },
   ];
+
+  const handlePhotoFileChange = useCallback((field: IndicativePhotoField, file: File | null) => {
+    if (!file) return;
+
+    const existingObjectUrl = photoObjectUrlsRef.current[field];
+    if (existingObjectUrl) {
+      URL.revokeObjectURL(existingObjectUrl);
+    }
+
+    const nextPreviewUrl = URL.createObjectURL(file);
+    photoObjectUrlsRef.current[field] = nextPreviewUrl;
+
+    setPhotoFiles((prev) => ({
+      ...prev,
+      [field]: file,
+    }));
+    setPhotoRemovals((prev) => ({
+      ...prev,
+      [field]: false,
+    }));
+    setPhotoPreviews((prev) => ({
+      ...prev,
+      [field]: nextPreviewUrl,
+    }));
+  }, []);
+
+  const handlePhotoRemove = useCallback((field: IndicativePhotoField) => {
+    const existingObjectUrl = photoObjectUrlsRef.current[field];
+    if (existingObjectUrl) {
+      URL.revokeObjectURL(existingObjectUrl);
+      photoObjectUrlsRef.current[field] = null;
+    }
+
+    setPhotoFiles((prev) => ({
+      ...prev,
+      [field]: null,
+    }));
+    setPhotoRemovals((prev) => ({
+      ...prev,
+      [field]: true,
+    }));
+    setPhotoPreviews((prev) => ({
+      ...prev,
+      [field]: "",
+    }));
+  }, []);
 
   const {
     componentRows,
@@ -1434,6 +1597,7 @@ export default function EditPropertyIndicativeValuationPage() {
             communeId: nextProperty.communeId || null,
             villageId: nextProperty.villageId || null,
           });
+          resetIndicativePhotoState(valuation);
         }
 
         setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
@@ -1505,44 +1669,58 @@ export default function EditPropertyIndicativeValuationPage() {
       return;
     }
 
+    const propertyPhotoUpdates = {
+      ...(photoRemovals.frontSide ? { frontSide: null } : {}),
+      ...(photoRemovals.inside ? { inside: null } : {}),
+    };
+    const hasPhotoFieldUpdates = Object.keys(propertyPhotoUpdates).length > 0;
+    const payload = {
+      propertyId: valuation?.propertyId,
+      property: {
+        propertyTypeId: Number(newProperty.propertyTypeId),
+        propertySubtypeId: parseOptionalNumber(newProperty.propertySubtypeId),
+        currentUseId: parseOptionalNumber(newProperty.currentUseId),
+        propertyName: normalizeOptionalText(newProperty.propertyName),
+        description: normalizeOptionalText(newProperty.description),
+        propertyAddress: buildPropertyAddressInput(newProperty),
+        propertyLocation: buildLocationInput(newProperty, shapes, polygonGeoJson),
+        ...(hasPhotoFieldUpdates ? { propertyPhotos: propertyPhotoUpdates } : {}),
+      },
+      currency: "USD" as any,
+      status: values.status as any,
+      workflowStatus: values.workflowStatus as any,
+      instructedBy: normalizeOptionalText(values.instructedBy),
+      contactName: normalizeOptionalText(values.contactName),
+      contactTel: normalizeOptionalText(values.contactTel),
+      accessValue: parseNullableNumber(values.accessValue),
+      feeRate: parseNullableNumber(values.feeRate),
+      discount: parseNullableNumber(values.discount),
+      chargeFee: maxChargeFeeValue > 0 ? maxChargeFeeValue : null,
+      valuerId: Number(values.valuerId || user?.id || 0) || undefined,
+      inspectorName: normalizeOptionalText(values.inspectorName),
+      indicationDate: values.indicationDate || undefined,
+      instructionDate: values.instructionDate || undefined,
+      intendedUse: normalizeOptionalText(values.intendedUse),
+      forcedSalePercent: parseNullableNumber(values.forcedSalePercent),
+      note: normalizeOptionalText(values.note),
+      internalNotes: normalizeOptionalText(values.internalNotes),
+      componentType: primaryComponent.componentType,
+      description: normalizeOptionalText(primaryComponent.description),
+      area: parseOptionalNumber(primaryComponent.area),
+      unit: "sqm",
+      minRate: primaryComponent.minRateValue,
+      maxRate: primaryComponent.maxRateValue,
+    };
+    const hasPhotoChanges = INDICATIVE_PHOTO_FIELDS.some(
+      (field) => photoFiles[field] instanceof File || photoRemovals[field],
+    );
+    const requestData = hasPhotoChanges
+      ? buildIndicativeUpdateFormData(payload as Record<string, unknown>, photoFiles)
+      : payload;
+
     await updateMutation.mutateAsync({
       id: valuationId,
-      data: {
-        propertyId: valuation?.propertyId,
-        property: {
-          propertyTypeId: Number(newProperty.propertyTypeId),
-          propertySubtypeId: parseOptionalNumber(newProperty.propertySubtypeId),
-          currentUseId: parseOptionalNumber(newProperty.currentUseId),
-          propertyName: normalizeOptionalText(newProperty.propertyName),
-          description: normalizeOptionalText(newProperty.description),
-          propertyAddress: buildPropertyAddressInput(newProperty),
-          propertyLocation: buildLocationInput(newProperty, shapes, polygonGeoJson),
-        },
-        currency: "USD" as any,
-        status: values.status as any,
-        workflowStatus: values.workflowStatus as any,
-        instructedBy: normalizeOptionalText(values.instructedBy),
-        contactName: normalizeOptionalText(values.contactName),
-        contactTel: normalizeOptionalText(values.contactTel),
-        accessValue: parseNullableNumber(values.accessValue),
-        feeRate: parseNullableNumber(values.feeRate),
-        discount: parseNullableNumber(values.discount),
-        chargeFee: maxChargeFeeValue > 0 ? maxChargeFeeValue : null,
-        valuerId: Number(values.valuerId || user?.id || 0) || undefined,
-        inspectorName: normalizeOptionalText(values.inspectorName),
-        indicationDate: values.indicationDate || undefined,
-        instructionDate: values.instructionDate || undefined,
-        intendedUse: normalizeOptionalText(values.intendedUse),
-        forcedSalePercent: parseNullableNumber(values.forcedSalePercent),
-        note: normalizeOptionalText(values.note),
-        internalNotes: normalizeOptionalText(values.internalNotes),
-        componentType: primaryComponent.componentType,
-        description: normalizeOptionalText(primaryComponent.description),
-        area: parseOptionalNumber(primaryComponent.area),
-        unit: "sqm",
-        minRate: primaryComponent.minRateValue,
-        maxRate: primaryComponent.maxRateValue,
-      },
+      data: requestData,
     });
 
     const existingExtraIds = (valuation?.indicativeComponents ?? [])
@@ -2007,7 +2185,11 @@ export default function EditPropertyIndicativeValuationPage() {
                             >
                               <div className="mb-3 flex items-center justify-between gap-3">
                                 <FormLabel>{photo.label}</FormLabel>
-                                <span className="text-xs text-muted-foreground">Current photo</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {photo.markedForRemoval
+                                    ? "Will be removed when you save"
+                                    : photo.selectedFileName || "Current photo"}
+                                </span>
                               </div>
 
                               {photo.value ? (
@@ -2023,6 +2205,39 @@ export default function EditPropertyIndicativeValuationPage() {
                                   {tc("noData")}
                                 </div>
                               )}
+
+                              <div className="mt-4 space-y-3">
+                                <Input
+                                  type="file"
+                                  accept="image/*"
+                                  disabled={updateMutation.isPending}
+                                  onChange={(event) => {
+                                    handlePhotoFileChange(
+                                      photo.key,
+                                      event.target.files?.[0] ?? null,
+                                    );
+                                    event.currentTarget.value = "";
+                                  }}
+                                />
+                                <div className="flex items-center justify-between gap-3">
+                                  <FormDescription className="text-xs">
+                                    Upload a new image to replace this photo.
+                                  </FormDescription>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={
+                                      updateMutation.isPending ||
+                                      (!photo.value && !photo.selectedFileName && !photo.markedForRemoval)
+                                    }
+                                    onClick={() => handlePhotoRemove(photo.key)}
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Remove
+                                  </Button>
+                                </div>
+                              </div>
                             </div>
                           ))}
                         </div>

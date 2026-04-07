@@ -21,6 +21,7 @@ import {
   exportIndicativeValuationsExcel,
   exportIndicativeValuationExcel,
   exportIndicativeValuationPdf,
+  exportIndicativeValuationTxt,
   updateIndicativeValuation,
   submitForReview,
   approveValuation,
@@ -86,10 +87,23 @@ indicativeValuationRoutes.get(
   exportIndicativeValuationPdf
 );
 
+indicativeValuationRoutes.get(
+  "/:indicationId/export/txt",
+  authenticate,
+  authorizeAny(3, ["property:read", "dashboard:read"]),
+  validate(indicationIdParamSchema, "params"),
+  exportIndicativeValuationTxt
+);
+
 indicativeValuationRoutes.patch(
   "/:indicationId",
   authenticate,
   authorizeAny(3, ["property:read", "dashboard:read"]),
+  upload.fields([
+    { name: "frontSide", maxCount: 1 },
+    { name: "inside", maxCount: 1 },
+  ]),
+  parseJsonFields,
   validate(indicationIdParamSchema, "params"),
   validate(updateIndicativeValuationSchema),
   updateIndicativeValuation

@@ -65,6 +65,11 @@ export const userSchema = z.object({
 });
 
 export const updateProfileSchema = z.object({
+  username: z
+    .string()
+    .min(1, "Username is required")
+    .max(50)
+    .optional(),
   email: z.string().min(1, "Email is required").email("Invalid email"),
   firstName: z.string().min(1, "First name is required").max(50),
   lastName: z.string().min(1, "Last name is required").max(50),
