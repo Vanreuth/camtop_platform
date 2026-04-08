@@ -33,12 +33,28 @@ interface LandInformationCardProps {
   t: (key: string) => string;
 }
 
+type DimensionField = "widthMeters" | "lengthMeters" | "landAreaSqm";
+
 export const LandInformationCard: React.FC<LandInformationCardProps> = ({
   formData,
   onInputChange,
   isAgricultural = false,
   t,
 }) => {
+  const parsePositiveNumber = (value: string) => {
+    const trimmedValue = value.trim();
+    if (!trimmedValue) {
+      return null;
+    }
+
+    const parsedValue = Number(trimmedValue);
+    if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
+      return null;
+    }
+
+    return parsedValue;
+  };
+
   const formatCalculatedValue = (value: number) => {
     if (!Number.isFinite(value) || value <= 0) {
       return "";
@@ -47,49 +63,74 @@ export const LandInformationCard: React.FC<LandInformationCardProps> = ({
     return value.toFixed(2).replace(/\.?0+$/, "");
   };
 
-  const handleDimensionChange = (field: string, value: string) => {
+  const widthValue = parsePositiveNumber(formData.widthMeters);
+  const lengthValue = parsePositiveNumber(formData.lengthMeters);
+  const areaValue = parsePositiveNumber(formData.landAreaSqm);
+  const updateCalculatedField = (field: DimensionField, value: string) => {
+    if (formData[field as keyof typeof formData] !== value) {
+      onInputChange(field, value);
+    }
+  };
+
+  const handleDimensionChange = (field: DimensionField, value: string) => {
     onInputChange(field, value);
 
     const nextWidth =
-      field === "widthMeters" ? Number(value) : Number(formData.widthMeters);
+      field === "widthMeters" ? parsePositiveNumber(value) : widthValue;
     const nextLength =
-      field === "lengthMeters" ? Number(value) : Number(formData.lengthMeters);
+      field === "lengthMeters" ? parsePositiveNumber(value) : lengthValue;
     const nextArea =
-      field === "landAreaSqm" ? Number(value) : Number(formData.landAreaSqm);
+      field === "landAreaSqm" ? parsePositiveNumber(value) : areaValue;
 
-    if (field === "widthMeters") {
-      if (nextWidth > 0 && nextArea > 0) {
-        onInputChange("lengthMeters", formatCalculatedValue(nextArea / nextWidth));
+    if (field === "widthMeters" || field === "lengthMeters") {
+      if (nextWidth !== null && nextLength !== null) {
+        updateCalculatedField(
+          "landAreaSqm",
+          formatCalculatedValue(nextWidth * nextLength)
+        );
         return;
       }
 
-      if (nextWidth > 0 && nextLength > 0) {
-        onInputChange("landAreaSqm", formatCalculatedValue(nextWidth * nextLength));
+      if (
+        field === "widthMeters" &&
+        nextWidth !== null &&
+        nextArea !== null &&
+        nextLength === null
+      ) {
+        updateCalculatedField(
+          "lengthMeters",
+          formatCalculatedValue(nextArea / nextWidth)
+        );
+        return;
+      }
+
+      if (
+        field === "lengthMeters" &&
+        nextLength !== null &&
+        nextArea !== null &&
+        nextWidth === null
+      ) {
+        updateCalculatedField(
+          "widthMeters",
+          formatCalculatedValue(nextArea / nextLength)
+        );
       }
       return;
     }
 
-    if (field === "lengthMeters") {
-      if (nextLength > 0 && nextArea > 0) {
-        onInputChange("widthMeters", formatCalculatedValue(nextArea / nextLength));
-        return;
-      }
-
-      if (nextWidth > 0 && nextLength > 0) {
-        onInputChange("landAreaSqm", formatCalculatedValue(nextWidth * nextLength));
-      }
+    if (nextArea !== null && nextWidth !== null && nextLength === null) {
+      updateCalculatedField(
+        "lengthMeters",
+        formatCalculatedValue(nextArea / nextWidth)
+      );
       return;
     }
 
-    if (field === "landAreaSqm") {
-      if (nextArea > 0 && nextWidth > 0) {
-        onInputChange("lengthMeters", formatCalculatedValue(nextArea / nextWidth));
-        return;
-      }
-
-      if (nextArea > 0 && nextLength > 0) {
-        onInputChange("widthMeters", formatCalculatedValue(nextArea / nextLength));
-      }
+    if (nextArea !== null && nextLength !== null && nextWidth === null) {
+      updateCalculatedField(
+        "widthMeters",
+        formatCalculatedValue(nextArea / nextLength)
+      );
     }
   };
 
@@ -103,7 +144,7 @@ export const LandInformationCard: React.FC<LandInformationCardProps> = ({
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Dimensions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-end">
           <div className="space-y-2">
             <Label htmlFor="widthMeters">
               {t('widthMeters')}{" "}
@@ -113,10 +154,15 @@ export const LandInformationCard: React.FC<LandInformationCardProps> = ({
               id="widthMeters"
               type="number"
               step="0.01"
+              min="0"
+              inputMode="decimal"
               placeholder={t('enterWidthMeters')}
               value={formData.widthMeters}
               onChange={(e) => handleDimensionChange('widthMeters', e.target.value)}
             />
+          </div>
+          <div className="hidden h-10 items-center justify-center text-lg font-semibold text-muted-foreground lg:flex">
+            x
           </div>
           <div className="space-y-2">
             <Label htmlFor="lengthMeters">
@@ -127,10 +173,15 @@ export const LandInformationCard: React.FC<LandInformationCardProps> = ({
               id="lengthMeters"
               type="number"
               step="0.01"
+              min="0"
+              inputMode="decimal"
               placeholder={t('enterLengthMeters')}
               value={formData.lengthMeters}
               onChange={(e) => handleDimensionChange('lengthMeters', e.target.value)}
             />
+          </div>
+          <div className="hidden h-10 items-center justify-center text-lg font-semibold text-muted-foreground lg:flex">
+            =
           </div>
           <div className="space-y-2">
             <Label htmlFor="landAreaSqm">
@@ -141,19 +192,13 @@ export const LandInformationCard: React.FC<LandInformationCardProps> = ({
               id="landAreaSqm"
               type="number"
               step="0.01"
+              min="0"
+              inputMode="decimal"
               placeholder={t('orEnterAreaDirectly')}
               value={formData.landAreaSqm}
               onChange={(e) => handleDimensionChange('landAreaSqm', e.target.value)}
               className="bg-blue-50 border-blue-200 font-medium"
             />
-            {formData.widthMeters && formData.lengthMeters && formData.landAreaSqm && (
-              <p className="text-xs text-green-600 flex items-center gap-1">
-                <span>✓</span>
-                <span>
-                  {formData.widthMeters}m × {formData.lengthMeters}m = {formData.landAreaSqm}m²
-                </span>
-              </p>
-            )}
           </div>
         </div>
 
