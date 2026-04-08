@@ -331,34 +331,21 @@ export const exportPropertiesToExcel = async (
     { header: "propertyId", key: "propertyId", width: 12 },
     { header: "propertyCode", key: "propertyCode", width: 22 },
     { header: "propertyName", key: "propertyName", width: 28 },
-    { header: "propertyTypeId", key: "propertyTypeId", width: 14 },
     { header: "propertyTypeName", key: "propertyTypeName", width: 20 },
     { header: "status", key: "status", width: 14 },
     { header: "workflowStatus", key: "workflowStatus", width: 18 },
-    { header: "description", key: "description", width: 36 },
-    { header: "provinceId", key: "provinceId", width: 12 },
     { header: "provinceNameEn", key: "provinceNameEn", width: 20 },
-    { header: "districtId", key: "districtId", width: 12 },
     { header: "districtNameEn", key: "districtNameEn", width: 20 },
-    { header: "communeId", key: "communeId", width: 12 },
     { header: "communeNameEn", key: "communeNameEn", width: 20 },
-    { header: "villageId", key: "villageId", width: 12 },
     { header: "villageNameEn", key: "villageNameEn", width: 20 },
-    { header: "street", key: "street", width: 20 },
-    { header: "houseNo", key: "houseNo", width: 12 },
-    { header: "frontSide", key: "frontSide", width: 40 },
-    { header: "inside", key: "inside", width: 40 },
     { header: "titleDeedType", key: "titleDeedType", width: 16 },
     { header: "titleDeedNo", key: "titleDeedNo", width: 18 },
     { header: "totalSizeByTitleDeed", key: "totalSizeByTitleDeed", width: 20 },
-    { header: "stampDate", key: "stampDate", width: 14 },
     { header: "latitude", key: "latitude", width: 14 },
     { header: "longitude", key: "longitude", width: 14 },
     { header: "transactionType", key: "transactionType", width: 18 },
     { header: "transactionDate", key: "transactionDate", width: 18 },
     { header: "totalPrice", key: "totalPrice", width: 16 },
-    { header: "createdAt", key: "createdAt", width: 22 },
-    { header: "updatedAt", key: "updatedAt", width: 22 },
   ];
 
   for (const property of properties) {
@@ -369,23 +356,13 @@ export const exportPropertiesToExcel = async (
       propertyId: property.propertyId,
       propertyCode: property.propertyCode,
       propertyName: property.propertyName,
-      propertyTypeId: property.propertyTypeId,
       propertyTypeName: property.propertyType.propertyName,
       status: property.status,
       workflowStatus: property.workflowStatus,
-      description: property.description ?? "",
-      provinceId: property.propertyAddress?.provinceId ?? "",
       provinceNameEn: property.propertyAddress?.province?.nameEn ?? "",
-      districtId: property.propertyAddress?.districtId ?? "",
       districtNameEn: property.propertyAddress?.district?.nameEn ?? "",
-      communeId: property.propertyAddress?.communeId ?? "",
       communeNameEn: property.propertyAddress?.commune?.nameEn ?? "",
-      villageId: property.propertyAddress?.villageId ?? "",
       villageNameEn: property.propertyAddress?.village?.nameEn ?? "",
-      street: property.propertyAddress?.street ?? "",
-      houseNo: property.propertyAddress?.houseNo ?? "",
-      frontSide: property.propertyPhotos?.frontSide ?? "",
-      inside: property.propertyPhotos?.inside ?? "",
       titleDeedType: titleDoc?.titleDeedType ?? "",
       titleDeedNo: titleDoc?.titleDeedNo ?? "",
       totalSizeByTitleDeed:
@@ -393,7 +370,6 @@ export const exportPropertiesToExcel = async (
         titleDoc?.totalSizeByTitleDeed !== undefined
           ? Number(titleDoc.totalSizeByTitleDeed)
           : "",
-      stampDate: titleDoc?.stampDate ?? "",
       latitude:
         property.propertyLocation?.latitude !== null &&
         property.propertyLocation?.latitude !== undefined
@@ -410,8 +386,6 @@ export const exportPropertiesToExcel = async (
         latestTransaction?.totalPrice !== undefined && latestTransaction?.totalPrice !== null
           ? Number(latestTransaction.totalPrice)
           : "",
-      createdAt: property.createdAt,
-      updatedAt: property.updatedAt,
     });
   }
 

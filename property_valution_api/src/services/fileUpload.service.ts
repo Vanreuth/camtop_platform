@@ -125,10 +125,10 @@ const uploadMultipleFiles = async (
   return Promise.all(files.map((file) => uploadFile(file, folder)));
 };
 
-const uploadPdfBuffer = async (
+const uploadBuffer = async (
   buffer: Buffer,
   key: string,
-  contentType: string = "application/pdf"
+  contentType: string = "application/octet-stream"
 ): Promise<{ key: string }> => {
   try {
     await s3.send(
@@ -142,9 +142,15 @@ const uploadPdfBuffer = async (
 
     return { key };
   } catch (error) {
-    throw new Error("PDF upload failed");
+    throw new Error("File upload failed");
   }
 };
+
+const uploadPdfBuffer = async (
+  buffer: Buffer,
+  key: string,
+  contentType: string = "application/pdf"
+): Promise<{ key: string }> => uploadBuffer(buffer, key, contentType);
 
 const uploadPdf = async (
   file: Express.Multer.File,
@@ -340,6 +346,7 @@ const uploadBuildingImages = async (
 export const FileUploadService = {
   uploadFile,
   uploadMultipleFiles,
+  uploadBuffer,
   uploadPdfBuffer,
   uploadPdf,
   downloadFileAsset,

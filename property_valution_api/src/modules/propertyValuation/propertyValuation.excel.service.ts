@@ -361,10 +361,7 @@ export const exportPropertyValuationsToExcel = async (
   const worksheet = workbook.addWorksheet("property-valuations");
 
   worksheet.columns = [
-    { header: "valuationId", key: "valuationId", width: 14 },
     { header: "valuationNo", key: "valuationNo", width: 24 },
-    { header: "propertyId", key: "propertyId", width: 12 },
-    { header: "propertyCode", key: "propertyCode", width: 22 },
     { header: "propertyName", key: "propertyName", width: 28 },
     { header: "propertyTypeName", key: "propertyTypeName", width: 20 },
     { header: "valuationMethod", key: "valuationMethod", width: 30 },
@@ -380,25 +377,15 @@ export const exportPropertyValuationsToExcel = async (
     { header: "pricePerSqm", key: "pricePerSqm", width: 14 },
     { header: "currency", key: "currency", width: 10 },
     { header: "preparedFor", key: "preparedFor", width: 24 },
-    { header: "valuerId", key: "valuerId", width: 12 },
     { header: "valuerName", key: "valuerName", width: 24 },
     { header: "purposeOfValuation", key: "purposeOfValuation", width: 28 },
-    { header: "note", key: "note", width: 28 },
-    { header: "internalNotes", key: "internalNotes", width: 28 },
-    { header: "provinceId", key: "provinceId", width: 12 },
     { header: "provinceNameEn", key: "provinceNameEn", width: 20 },
-    { header: "districtId", key: "districtId", width: 12 },
     { header: "districtNameEn", key: "districtNameEn", width: 20 },
-    { header: "communeId", key: "communeId", width: 12 },
     { header: "communeNameEn", key: "communeNameEn", width: 20 },
-    { header: "villageId", key: "villageId", width: 12 },
     { header: "villageNameEn", key: "villageNameEn", width: 20 },
     { header: "titleDeedType", key: "titleDeedType", width: 16 },
     { header: "titleDeedNo", key: "titleDeedNo", width: 18 },
     { header: "totalSizeByTitleDeed", key: "totalSizeByTitleDeed", width: 20 },
-    { header: "stampDate", key: "stampDate", width: 14 },
-    { header: "createdAt", key: "createdAt", width: 22 },
-    { header: "updatedAt", key: "updatedAt", width: 22 },
   ];
 
   for (const valuation of valuations) {
@@ -409,10 +396,7 @@ export const exportPropertyValuationsToExcel = async (
     const titleDoc = valuation.property.titleDocument;
 
     worksheet.addRow({
-      valuationId: valuation.valuationId,
       valuationNo: valuation.valuationNo,
-      propertyId: valuation.propertyId,
-      propertyCode: valuation.property.propertyCode,
       propertyName: valuation.property.propertyName,
       propertyTypeName: valuation.property.propertyType.propertyName,
       valuationMethod: valuation.valuationMethod,
@@ -443,18 +427,11 @@ export const exportPropertyValuationsToExcel = async (
           : "",
       currency: valuation.currency,
       preparedFor: valuation.preparedFor ?? "",
-      valuerId: valuation.valuerId ?? "",
       valuerName,
       purposeOfValuation: valuation.purposeOfValuation ?? "",
-      note: valuation.note ?? "",
-      internalNotes: valuation.internalNotes ?? "",
-      provinceId: valuation.property.propertyAddress?.provinceId ?? "",
       provinceNameEn: valuation.property.propertyAddress?.province?.nameEn ?? "",
-      districtId: valuation.property.propertyAddress?.districtId ?? "",
       districtNameEn: valuation.property.propertyAddress?.district?.nameEn ?? "",
-      communeId: valuation.property.propertyAddress?.communeId ?? "",
       communeNameEn: valuation.property.propertyAddress?.commune?.nameEn ?? "",
-      villageId: valuation.property.propertyAddress?.villageId ?? "",
       villageNameEn: valuation.property.propertyAddress?.village?.nameEn ?? "",
       titleDeedType: titleDoc?.titleDeedType ?? "",
       titleDeedNo: titleDoc?.titleDeedNo ?? "",
@@ -463,9 +440,6 @@ export const exportPropertyValuationsToExcel = async (
         titleDoc?.totalSizeByTitleDeed !== undefined
           ? Number(titleDoc.totalSizeByTitleDeed)
           : "",
-      stampDate: titleDoc?.stampDate ?? "",
-      createdAt: valuation.createdAt,
-      updatedAt: valuation.updatedAt,
     });
   }
 

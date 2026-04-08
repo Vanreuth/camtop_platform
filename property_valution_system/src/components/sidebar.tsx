@@ -28,7 +28,8 @@ import {
   ChevronsUpDown,
   BookAlert,
   MapPinHouse,
-  CircleDollarSign
+  CircleDollarSign,
+  FileSpreadsheet
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -107,7 +108,7 @@ export function AppSidebar() {
   
   const { setOpenMobile, isMobile } = useSidebar();
   
-  const { user, logout, hasHierarchyLevel, isSuperAdmin } = useAuth();
+  const { user, logout, hasHierarchyLevel, hasAnyPermission, isSuperAdmin } = useAuth();
   const tNav = useTranslations("nav");
   const tCommon = useTranslations("common");
 
@@ -116,8 +117,11 @@ export function AppSidebar() {
   const isAdmin = isSuperAdmin();
   const canViewDashboardAndAnalytics = hasHierarchyLevel(3);
   const canViewUserManagement = hasHierarchyLevel(2);
-  const canViewSecurity = hasHierarchyLevel(3);
+  const canViewSecurity = hasHierarchyLevel(2);
   const canViewValuationAndMap = hasHierarchyLevel(3);
+  const canAccessReports =
+    hasHierarchyLevel(2) ||
+    hasAnyPermission(["property:read", "dashboard:read", "user:read", "user:manage"]);
 
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
@@ -165,6 +169,15 @@ export function AppSidebar() {
                     title: tNav("analytics"),
                     href: "/dashboard/analytics",
                     icon: BarChart3,
+                  },
+                ]
+              : []),
+            ...(canAccessReports
+              ? [
+                  {
+                    title: tNav("reports"),
+                    href: "/dashboard/reports",
+                    icon: FileSpreadsheet,
                   },
                 ]
               : []),
@@ -263,6 +276,7 @@ export function AppSidebar() {
       canViewUserManagement,
       canViewSecurity,
       canViewValuationAndMap,
+      canAccessReports,
       isAdmin,
     ]
   );
