@@ -10,6 +10,7 @@ import { propertyValuationRoutes } from "../modules/propertyValuation/propertyVa
 import {propertyAddressRoutes} from "../modules/propertyAddress/propertyAddress.route";
 import notificationRoute from "../modules/notification/notification.routes";
 import { indicativeValuationRoutes } from "../modules/indicativeValuation/indicativeValuation.routes";
+import { reportRoutes } from "../modules/report/report.routes";
 const rootRoutes = Router();
 
 
@@ -24,5 +25,6 @@ rootRoutes.use("/property-address", propertyAddressRoutes);
 rootRoutes.use("/property-valuations", propertyValuationRoutes);
 rootRoutes.use("/property-indicativeValuation", indicativeValuationRoutes);
 rootRoutes.use("/notifications", notificationRoute);
+rootRoutes.use("/reports", reportRoutes);
 
 export default rootRoutes;

@@ -32,6 +32,7 @@ import {
   MapPinned,
   UserCog,
   HelpCircle,
+  FileSpreadsheet,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -47,6 +48,7 @@ type AppItem = {
   bgColor: string;
   badge?: string | null;
   maxHierarchyLevel?: number;
+  requiredPermissions?: string[];
 };
 
 const GROUP_ORDER: AppItem["group"][] = [
@@ -63,7 +65,7 @@ export function AppSwitcher() {
 
   const router = useRouter();
   const pathname = usePathname();
-  const { hasHierarchyLevel } = useAuth();
+  const { hasHierarchyLevel, canAccessAny } = useAuth();
   const unreadCountQuery = useUnreadCount();
   const unreadCount = typeof unreadCountQuery.data === "number" ? unreadCountQuery.data : 0;
   const tNav = useTranslations("nav");
@@ -170,6 +172,16 @@ export function AppSwitcher() {
         badge: unreadCount > 0 ? (unreadCount > 99 ? "99+" : String(unreadCount)) : null,
       },
       {
+        name: tNav("reports"),
+        icon: FileSpreadsheet,
+        href: "/dashboard/reports",
+        description: tApp("dataInsights"),
+        group: "tools",
+        color: "text-lime-600",
+        bgColor: "bg-lime-100 dark:bg-lime-900/30",
+        requiredPermissions: ["property:read", "dashboard:read", "user:read", "user:manage"],
+      },
+      {
         name: tNav("security"),
         icon: Shield,
         href: "/dashboard/security",
@@ -212,10 +224,10 @@ export function AppSwitcher() {
     () =>
       appItems.filter(
         (app) =>
-          app.maxHierarchyLevel === undefined ||
-          hasHierarchyLevel(app.maxHierarchyLevel)
+          (app.maxHierarchyLevel === undefined || hasHierarchyLevel(app.maxHierarchyLevel)) &&
+          (!app.requiredPermissions?.length || canAccessAny(99, app.requiredPermissions))
       ),
-    [appItems, hasHierarchyLevel]
+    [appItems, canAccessAny, hasHierarchyLevel]
   );
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
