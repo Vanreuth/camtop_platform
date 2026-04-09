@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { usePropertiesLocation } from "@/hooks/property/useProperty";
 import { useIndicativeValuations } from "@/hooks/indicativeValuation/useIndicativeValuation";
 import { usePropertyValuations } from "@/hooks/propertyValuation/usePropertyValuation";
-import PropertyLocationsMap from "@/components/PropertyLocationsMap";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "next-intl";
 import { AlertCircle, Loader2, Search } from "lucide-react";
@@ -29,6 +29,21 @@ type PropertyLocationsPayload = {
 const APPROVED_WORKFLOW_STATUS = "APPROVED";
 const ACTIVE_RECORD_STATUS = "ACTIVE";
 const ALL_FILTER_VALUE = "all";
+
+const PropertyLocationsMap = dynamic(
+  () => import("@/components/PropertyLocationsMap"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex min-h-[60vh] items-center justify-center rounded-xl border bg-muted/20">
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          Loading map experience...
+        </div>
+      </div>
+    ),
+  }
+);
 
 type CoverageFilter =
   | "all"

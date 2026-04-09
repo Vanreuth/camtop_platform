@@ -6,6 +6,15 @@ const withNextIntl = createNextIntlPlugin("./src/app/i18n.ts");
 const nextConfig: NextConfig = {
   // Required for production Docker (standalone mode creates a minimal server.js)
   output: "standalone",
+  compiler: {
+    removeConsole:
+      process.env.NODE_ENV === "production"
+        ? { exclude: ["error", "warn"] }
+        : false,
+  },
+  experimental: {
+    optimizePackageImports: ["lucide-react"],
+  },
 
   // Security headers
   async headers() {

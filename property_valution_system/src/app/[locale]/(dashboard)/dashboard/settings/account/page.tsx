@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useForm } from "react-hook-form";
+import {
+  type ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { type Control, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
@@ -34,6 +41,7 @@ import {
   updateProfileSchema,
   type ChangePasswordInput,
   type UpdateProfileInput,
+  type UserPayload,
 } from "@/hooks/auth/auth.schemas";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -46,6 +54,136 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 
+const ROLE_COLOR_MAP: Record<string, string> = {
+  SUPER_ADMIN: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
+  PROP_MGR: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
+  DATA_ENTRY: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
+  VIEWER: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300",
+};
+
+const DEFAULT_ROLE_COLOR =
+  "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
+const PASSWORD_HAS_NUMBER_REGEX = /[0-9]/;
+
+function getRoleColor(roleCode: string) {
+  return ROLE_COLOR_MAP[roleCode] ?? DEFAULT_ROLE_COLOR;
+}
+
+function getProfileFormValues(user?: UserPayload | null): UpdateProfileInput {
+  return {
+    firstName: user?.firstName ?? "",
+    lastName: user?.lastName ?? "",
+    email: user?.email ?? "",
+    phone: user?.phone ?? "",
+    bio: user?.bio ?? "",
+    profilePicture: undefined,
+  };
+}
+
+function ValidationItem({
+  isValid,
+  text,
+}: {
+  isValid: boolean;
+  text: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      {isValid ? (
+        <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
+      ) : (
+        <X className="h-4 w-4 text-muted-foreground" />
+      )}
+      <span
+        className={
+          isValid
+            ? "text-green-600 dark:text-green-400"
+            : "text-muted-foreground"
+        }
+      >
+        {text}
+      </span>
+    </div>
+  );
+}
+
+function PasswordRequirements({
+  control,
+}: {
+  control: Control<ChangePasswordInput>;
+}) {
+  const newPasswordValue = useWatch({
+    control,
+    name: "newPassword",
+    defaultValue: "",
+  });
+
+  const passwordValidation = useMemo(
+    () => ({
+      minLength: newPasswordValue.length >= 8,
+      hasNumber: PASSWORD_HAS_NUMBER_REGEX.test(newPasswordValue),
+    }),
+    [newPasswordValue]
+  );
+
+  if (!newPasswordValue) return null;
+
+  return (
+    <div className="mt-3 space-y-2 rounded-lg border bg-muted/50 p-4">
+      <p className="mb-2 text-xs font-semibold text-foreground">
+        Password Requirements:
+      </p>
+      <ValidationItem
+        isValid={passwordValidation.minLength}
+        text="At least 8 characters"
+      />
+      <ValidationItem
+        isValid={passwordValidation.hasNumber}
+        text="At least one number"
+      />
+    </div>
+  );
+}
+
+function PasswordMatchStatus({
+  control,
+}: {
+  control: Control<ChangePasswordInput>;
+}) {
+  const newPasswordValue = useWatch({
+    control,
+    name: "newPassword",
+    defaultValue: "",
+  });
+  const confirmPasswordValue = useWatch({
+    control,
+    name: "confirmPassword",
+    defaultValue: "",
+  });
+
+  if (!confirmPasswordValue) return null;
+
+  const passwordsMatch = newPasswordValue === confirmPasswordValue;
+
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      {passwordsMatch ? (
+        <>
+          <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
+          <p className="text-sm text-green-600 dark:text-green-400">
+            Passwords match
+          </p>
+        </>
+      ) : (
+        <>
+          <X className="h-4 w-4 text-destructive" />
+          <p className="text-sm text-destructive">Passwords do not match</p>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsAccountPage() {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -53,6 +191,8 @@ export default function SettingsAccountPage() {
 
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string>("");
+  const profilePictureInputRef = useRef<HTMLInputElement>(null);
+  const previewObjectUrlRef = useRef<string | null>(null);
 
   const {
     user,
@@ -66,14 +206,7 @@ export default function SettingsAccountPage() {
 
   const profileForm = useForm<UpdateProfileInput>({
     resolver: zodResolver(updateProfileSchema),
-    defaultValues: {
-      firstName: "",
-      lastName: "",
-      email: "",
-      phone: "",
-      bio: "",
-      profilePicture: undefined,
-    },
+    defaultValues: getProfileFormValues(),
     mode: "onChange",
   });
 
@@ -87,83 +220,61 @@ export default function SettingsAccountPage() {
     mode: "onChange",
   });
 
-  useEffect(() => {
-    if (user) {
-      profileForm.reset({
-        firstName: user.firstName || "",
-        lastName: user.lastName || "",
-        email: user.email || "",
-        phone: user.phone || "",
-        bio: user.bio || "",
-        profilePicture: undefined,
-      });
-      if (user.profilePicture) {
-        setPreviewUrl(user.profilePicture);
-      }
-    }
-  }, [user, profileForm]);
+  const resetProfileForm = useCallback(
+    (nextUser?: UserPayload | null) => {
+      profileForm.reset(getProfileFormValues(nextUser));
+    },
+    [profileForm]
+  );
 
-  // Prevent blob URL leaks
+  const clearObjectPreview = useCallback(() => {
+    if (!previewObjectUrlRef.current) return;
+
+    URL.revokeObjectURL(previewObjectUrlRef.current);
+    previewObjectUrlRef.current = null;
+  }, []);
+
   useEffect(() => {
-    if (!previewUrl.startsWith("blob:")) return;
+    if (!user) return;
+
+    resetProfileForm(user);
+    clearObjectPreview();
+    setPreviewUrl(user.profilePicture || "");
+    if (profilePictureInputRef.current) {
+      profilePictureInputRef.current.value = "";
+    }
+  }, [user, resetProfileForm, clearObjectPreview]);
+
+  useEffect(() => {
     return () => {
-      URL.revokeObjectURL(previewUrl);
+      clearObjectPreview();
     };
-  }, [previewUrl]);
+  }, [clearObjectPreview]);
 
-  const getRoleColor = (roleCode: string) => {
-    switch (roleCode) {
-      case "SUPER_ADMIN":
-        return "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300";
-      case "PROP_MGR":
-        return "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300";
-      case "DATA_ENTRY":
-        return "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300";
-      case "VIEWER":
-        return "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300";
-      default:
-        return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
-    }
+  const handleProfilePictureChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    profileForm.setValue("profilePicture", file, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+
+    clearObjectPreview();
+    const objectUrl = URL.createObjectURL(file);
+    previewObjectUrlRef.current = objectUrl;
+    setPreviewUrl(objectUrl);
   };
 
-  const newPasswordValue = passwordForm.watch("newPassword") || "";
-  const confirmPasswordValue = passwordForm.watch("confirmPassword") || "";
-
-  const passwordValidation = useMemo(() => {
-    return {
-      minLength: newPasswordValue.length >= 8,
-      hasNumber: /[0-9]/.test(newPasswordValue),
-    };
-  }, [newPasswordValue]);
-
-  const passwordsMatch = useMemo(() => {
-    return newPasswordValue === confirmPasswordValue && confirmPasswordValue !== "";
-  }, [newPasswordValue, confirmPasswordValue]);
-
-  const ValidationItem = ({
-    isValid,
-    text,
-  }: {
-    isValid: boolean;
-    text: string;
-  }) => (
-    <div className="flex items-center gap-2 text-sm">
-      {isValid ? (
-        <Check className="w-4 h-4 text-green-600 dark:text-green-400" />
-      ) : (
-        <X className="w-4 h-4 text-muted-foreground" />
-      )}
-      <span
-        className={
-          isValid
-            ? "text-green-600 dark:text-green-400"
-            : "text-muted-foreground"
-        }
-      >
-        {text}
-      </span>
-    </div>
-  );
+  const handleCancelProfileEdit = () => {
+    setIsEditingProfile(false);
+    resetProfileForm(user);
+    clearObjectPreview();
+    setPreviewUrl(user?.profilePicture || "");
+    if (profilePictureInputRef.current) {
+      profilePictureInputRef.current.value = "";
+    }
+  };
 
   if (isLoading) {
     return (
@@ -248,26 +359,18 @@ export default function SettingsAccountPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() =>
-                      document.getElementById("profilePicture")?.click()
-                    }
+                    onClick={() => profilePictureInputRef.current?.click()}
                   >
                     <Camera className="h-4 w-4 mr-2" />
                     Change Photo
                   </Button>
                 </label>
                 <input
+                  ref={profilePictureInputRef}
                   id="profilePicture"
                   type="file"
                   accept="image/*"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    profileForm.setValue("profilePicture", file, {
-                      shouldValidate: true,
-                    });
-                    setPreviewUrl(URL.createObjectURL(file));
-                  }}
+                  onChange={handleProfilePictureChange}
                   className="hidden"
                 />
                 <p className="text-xs text-muted-foreground mt-2">
@@ -285,12 +388,16 @@ export default function SettingsAccountPage() {
                   if (!user) return;
                   try {
                     const result = await updateProfile(values);
+                    clearObjectPreview();
                     setIsEditingProfile(false);
-                    profileForm.setValue("profilePicture", undefined);
+                    resetProfileForm(user);
                     const maybeUrl =
                       (result as any)?.profilePicture ||
                       (result as any)?.data?.profilePicture;
-                    if (maybeUrl) setPreviewUrl(maybeUrl);
+                    setPreviewUrl(maybeUrl || user.profilePicture || "");
+                    if (profilePictureInputRef.current) {
+                      profilePictureInputRef.current.value = "";
+                    }
                   } catch {
                     // useAuth already toasts errors
                   }
@@ -393,18 +500,7 @@ export default function SettingsAccountPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => {
-                      setIsEditingProfile(false);
-                      profileForm.reset({
-                        firstName: user.firstName || "",
-                        lastName: user.lastName || "",
-                        email: user.email || "",
-                        phone: user.phone || "",
-                        bio: user.bio || "",
-                        profilePicture: undefined,
-                      });
-                      setPreviewUrl(user.profilePicture || "");
-                    }}
+                    onClick={handleCancelProfileEdit}
                     disabled={isUpdatingProfile}
                   >
                     Cancel
@@ -596,22 +692,7 @@ export default function SettingsAccountPage() {
                       </div>
                     </FormControl>
                     <FormMessage />
-
-                    {!!passwordForm.watch("newPassword") && (
-                      <div className="mt-3 p-4 bg-muted/50 rounded-lg border space-y-2">
-                        <p className="text-xs font-semibold text-foreground mb-2">
-                          Password Requirements:
-                        </p>
-                        <ValidationItem
-                          isValid={passwordValidation.minLength}
-                          text="At least 8 characters"
-                        />
-                        <ValidationItem
-                          isValid={passwordValidation.hasNumber}
-                          text="At least one number"
-                        />
-                      </div>
-                    )}
+                    <PasswordRequirements control={passwordForm.control} />
                   </FormItem>
                 )}
               />
@@ -646,26 +727,7 @@ export default function SettingsAccountPage() {
                       </div>
                     </FormControl>
                     <FormMessage />
-
-                    {!!passwordForm.watch("confirmPassword") && (
-                      <div className="flex items-center gap-2 mt-2">
-                        {passwordsMatch ? (
-                          <>
-                            <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
-                            <p className="text-sm text-green-600 dark:text-green-400">
-                              Passwords match
-                            </p>
-                          </>
-                        ) : (
-                          <>
-                            <X className="h-4 w-4 text-destructive" />
-                            <p className="text-sm text-destructive">
-                              Passwords do not match
-                            </p>
-                          </>
-                        )}
-                      </div>
-                    )}
+                    <PasswordMatchStatus control={passwordForm.control} />
                   </FormItem>
                 )}
               />
@@ -684,11 +746,7 @@ export default function SettingsAccountPage() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={
-                    isChangingPassword ||
-                    !passwordForm.formState.isValid ||
-                    !passwordsMatch
-                  }
+                  disabled={isChangingPassword || !passwordForm.formState.isValid}
                   className="flex-1 md:flex-none"
                 >
                   {isChangingPassword ? (
