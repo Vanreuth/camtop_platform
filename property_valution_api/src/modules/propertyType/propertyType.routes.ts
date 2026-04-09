@@ -22,14 +22,14 @@ export const propertyTypeRoutes = Router();
 propertyTypeRoutes.get(
   "/",
   authenticate,
-  authorize(2, ["property:read"]),
+  authorize(4, ["property:read"]),
   getAllPropertyTypes
 );
 
 propertyTypeRoutes.get(
   "/:id",
   authenticate,
-  authorize(2, ["property:read"]),
+  authorize(4, ["property:read"]),
   validate(propertyTypeIdParamSchema, "params"),
   getPropertyTypeById
 );
