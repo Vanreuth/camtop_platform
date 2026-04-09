@@ -7,15 +7,16 @@ import React, {
   useEffect,
   useMemo,
 } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { authApi } from "@/hooks/auth/auth.api";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, usePathname } from "next/navigation";
 import { AUTH_TOKEN_EVENT } from "@/lib/token";
+import { useAuth } from "./useAuth";
+import type { UserPayload } from "./auth.schemas";
 
 type AuthState = {
   isReady: boolean;
   isAuthenticated: boolean;
-  user: Awaited<ReturnType<typeof authApi.getProfile>>["user"] | null;
+  user: UserPayload | null;
 };
 
 const AuthContext = createContext<AuthState>({
@@ -40,6 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname() ?? "";
   const queryClient = useQueryClient();
+  const { user, isLoading } = useAuth();
   const normalizedPath = stripLocale(pathname) || "/";
   const isPublicPage = PUBLIC_ROUTES.some((route) =>
     normalizedPath.startsWith(route)
@@ -51,28 +53,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const safeLocale = locale === "en" || locale === "kh" ? locale : "en";
     router.replace(`/${safeLocale}/login?redirect=${encodeURIComponent(pathname)}`);
   }, [pathname, router]);
-
-  const meQuery = useQuery({
-    queryKey: ["auth", "me"],
-    queryFn: async () => {
-      try {
-        return await authApi.getProfile();
-      } catch (err: unknown) {
-        const status =
-          (err as { status?: number; response?: { status?: number } })?.status ??
-          (err as { status?: number; response?: { status?: number } })?.response?.status;
-        if (status === 401) return null;
-        throw err;
-      }
-    },
-    retry: false,
-    refetchOnWindowFocus: false,
-    staleTime: 1000 * 60 * 5,
-  });
-
-  const user = meQuery.data?.user ?? null;
   const isAuthenticated = !!user;
-  const isReady = !meQuery.isLoading;
+  const isReady = !isLoading;
 
   useEffect(() => {
     if (isPublicPage || !isReady || isAuthenticated) return;

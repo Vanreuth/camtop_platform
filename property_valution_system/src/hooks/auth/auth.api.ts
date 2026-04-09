@@ -140,14 +140,7 @@ export const authApi = {
       const fd = new FormData();
       fd.append("profile", JSON.stringify(rest));
       fd.append("profilePicture", profilePicture);
-      
-      // Debug logging
-      console.log("Uploading with file:", profilePicture.name, profilePicture.size, profilePicture.type);
-      console.log("FormData entries:");
-      for (const pair of fd.entries()) {
-        console.log(pair[0], typeof pair[1] === 'string' ? pair[1] : `File: ${(pair[1] as File).name}`);
-      }
-      
+
       const { data } = await api.patch("/auth/me/profile", fd);
       return unwrap<AuthPayload>(data);
     }
