@@ -117,11 +117,11 @@ export function AppSidebar() {
   const isAdmin = isSuperAdmin();
   const canViewDashboardAndAnalytics = hasHierarchyLevel(3);
   const canViewUserManagement = hasHierarchyLevel(2);
-  const canViewSecurity = hasHierarchyLevel(2);
+  const canViewSecurity = hasHierarchyLevel(4);
   const canViewValuationAndMap = hasHierarchyLevel(3);
   const canAccessReports =
     hasHierarchyLevel(2) ||
-    hasAnyPermission(["property:read", "dashboard:read", "user:read", "user:manage"]);
+    hasAnyPermission(["property:read", "dashboard:read", "user:read"]);
 
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 

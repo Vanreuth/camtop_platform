@@ -70,6 +70,21 @@ interface DataTableProps<T extends DataRow> {
   customRowActions?: (item: T) => React.ReactNode;
 }
 
+const toDateBoundary = (value: string, boundary: "start" | "end") => {
+  if (!value) return undefined;
+
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+
+  if (boundary === "end") {
+    parsed.setHours(23, 59, 59, 999);
+  } else {
+    parsed.setHours(0, 0, 0, 0);
+  }
+
+  return parsed;
+};
+
 export function DataTable<T extends DataRow>({
   config,
   useDataHook,
@@ -236,8 +251,11 @@ export function DataTable<T extends DataRow>({
 });
 
 
-    if (dateRange.from) params.createdAfter = new Date(dateRange.from);
-    if (dateRange.to) params.createdBefore = new Date(dateRange.to);
+    const createdAfter = toDateBoundary(dateRange.from, "start");
+    const createdBefore = toDateBoundary(dateRange.to, "end");
+
+    if (createdAfter) params.createdAfter = createdAfter;
+    if (createdBefore) params.createdBefore = createdBefore;
     if (config.forcedParams) {
       Object.entries(config.forcedParams).forEach(([key, value]) => {
         if (value === undefined || value === null || value === "") return;

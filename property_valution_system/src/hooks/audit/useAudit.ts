@@ -15,8 +15,11 @@ export const auditKeys = {
   logs: () => [...auditKeys.all, "logs"] as const,
   logList: (filters?: SearchFilters, pagination?: PaginationOptions) =>
     [...auditKeys.logs(), filters, pagination] as const,
-  userLogs: (userId?: number, pagination?: PaginationOptions) =>
-    [...auditKeys.logs(), "user", userId, pagination] as const,
+  userLogs: (
+    userId?: number,
+    filters?: SearchFilters,
+    pagination?: PaginationOptions
+  ) => [...auditKeys.logs(), "user", userId, filters, pagination] as const,
   summary: (params?: { userId?: number; days?: number }) =>
     [...auditKeys.all, "summary", params] as const,
 };
@@ -37,16 +40,17 @@ export function useAuditLogs(
 
 export function useUserAuditLogs(
   userId?: number,
+  filters: SearchFilters = {},
   pagination: PaginationOptions = {},
   enabled = true
 ) {
   return useQuery<AuditLogResult>({
-    queryKey: auditKeys.userLogs(userId, pagination),
+    queryKey: auditKeys.userLogs(userId, filters, pagination),
     queryFn: () => {
       if (!userId) {
         throw new Error("userId is required");
       }
-      return auditApi.getUserAuditLogs(userId, pagination);
+      return auditApi.getUserAuditLogs(userId, filters, pagination);
     },
     enabled: enabled && !!userId,
     staleTime: 30_000,

@@ -113,6 +113,14 @@ export class AuditController {
     const limit = Math.min(100, Math.max(1, toNumber(req.query.limit) ?? 20));
 
     const result = await service.getUserAuditLogs(userId, {
+      action: typeof req.query.action === "string" ? req.query.action : undefined,
+      entity: typeof req.query.entity === "string" ? req.query.entity : undefined,
+      entityId: toNumber(req.query.entityId),
+      ipAddress:
+        typeof req.query.ipAddress === "string" ? req.query.ipAddress : undefined,
+      dateFrom: toDate(req.query.dateFrom),
+      dateTo: toDate(req.query.dateTo),
+    }, {
       skip: (page - 1) * limit,
       take: limit,
       sortBy: "createdAt",

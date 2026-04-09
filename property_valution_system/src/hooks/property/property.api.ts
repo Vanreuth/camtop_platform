@@ -52,7 +52,7 @@ const buildQueryString = (params: ApiParams): string => {
   );
 
   return new URLSearchParams(
-    Object.entries(cleaned).map(([key, value]) => [key, String(value)])
+    Object.entries(cleaned).map(([key, value]) => [key, String(coerceDate(value))])
   ).toString();
 };
 

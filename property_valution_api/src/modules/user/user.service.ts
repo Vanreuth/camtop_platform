@@ -6,6 +6,7 @@ import { NotFoundError } from "../../common/errors/notFound.error";
 import { ForbiddenError } from "../../common/errors/forbidden.error";
 import { FileUploadService } from "../../services/fileUpload.service";
 import { AuditService } from "../audit/audit.service";
+import type { AuditFilters } from "../audit/audit.type";
 
 type PaginationOptions = {
   page?: number;
@@ -110,17 +111,22 @@ export class UserService {
 
   async getAuditLogs(
     userId: number,
+    filters: AuditFilters = {},
     pagination: { page?: number; limit?: number } = {},
   ) {
     const page = Math.max(1, pagination.page ?? 1);
     const limit = Math.min(Math.max(1, pagination.limit ?? 20), 100);
 
-    return this.auditService.getUserAuditLogs(userId, {
-      skip: (page - 1) * limit,
-      take: limit,
-      sortBy: "createdAt",
-      sortOrder: "desc",
-    });
+    return this.auditService.getUserAuditLogs(
+      userId,
+      filters,
+      {
+        skip: (page - 1) * limit,
+        take: limit,
+        sortBy: "createdAt",
+        sortOrder: "desc",
+      }
+    );
   }
 
   async findByEmail(email: string) {

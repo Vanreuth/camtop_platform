@@ -15,6 +15,7 @@ export type PropertyExcelExportFilters = {
   status?: PropertyStatus;
   workflowStatus?: WorkflowStatus;
   propertyTypeId?: number;
+  includeValuated?: boolean;
   provinceId?: string;
   districtId?: string;
   communeId?: string;
@@ -198,6 +199,194 @@ const getPropertyTypeName = async (propertyTypeId: number): Promise<string> => {
   return propertyType.propertyName;
 };
 
+const EXCEL_COLORS = {
+  headerFill: "FF0F766E",
+  headerText: "FFFFFFFF",
+  border: "FFD1D5DB",
+  summaryFill: "FFF8FAFC",
+  summaryHeading: "FF0F172A",
+} as const;
+
+const formatExportDateTime = (value?: Date | null): string => {
+  if (!value) return "-";
+
+  return value.toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const formatExportNumber = (value?: number): string => {
+  if (value === undefined || value === null || Number.isNaN(value)) return "-";
+  return value.toLocaleString("en-US");
+};
+
+const buildExportSummaryRows = async (
+  filters: PropertyExcelExportFilters,
+  recordCount: number,
+) => {
+  const propertyTypeLabel = filters.propertyTypeId
+    ? await prisma.propertyType
+        .findUnique({
+          where: { propertyTypeId: filters.propertyTypeId },
+          select: { propertyName: true },
+        })
+        .then((item) => item?.propertyName ?? `#${filters.propertyTypeId}`)
+        .catch(() => `#${filters.propertyTypeId}`)
+    : undefined;
+
+  const locationParts = [
+    filters.provinceId ? `Province: ${filters.provinceId}` : undefined,
+    filters.districtId ? `District: ${filters.districtId}` : undefined,
+    filters.communeId ? `Commune: ${filters.communeId}` : undefined,
+    filters.villageId ? `Village: ${filters.villageId}` : undefined,
+  ].filter(Boolean);
+
+  const rows: Array<{ label: string; value: string }> = [
+    { label: "Exported at", value: formatExportDateTime(new Date()) },
+    { label: "Records exported", value: formatExportNumber(recordCount) },
+  ];
+
+  if (filters.search?.trim()) {
+    rows.push({ label: "Search", value: filters.search.trim() });
+  }
+
+  if (filters.status) {
+    rows.push({ label: "Status", value: filters.status });
+  }
+
+  rows.push({
+    label: "Valuation filter",
+    value: filters.includeValuated
+      ? "Including valuated and indicative-valuated properties"
+      : "Without valuation and without indicative valuation only",
+  });
+
+  rows.push({
+    label: "Workflow status",
+    value: filters.workflowStatus ?? "All except ARCHIVED",
+  });
+
+  if (propertyTypeLabel) {
+    rows.push({ label: "Property type", value: propertyTypeLabel });
+  }
+
+  if (locationParts.length > 0) {
+    rows.push({ label: "Location filters", value: locationParts.join(" | ") });
+  }
+
+  if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
+    rows.push({
+      label: "Price range",
+      value: `${formatExportNumber(filters.minPrice)} - ${formatExportNumber(filters.maxPrice)}`,
+    });
+  }
+
+  if (filters.createdAfter || filters.createdBefore) {
+    rows.push({
+      label: "Created date range",
+      value: `${formatExportDateTime(filters.createdAfter)} - ${formatExportDateTime(filters.createdBefore)}`,
+    });
+  }
+
+  if (filters.createdById) {
+    rows.push({ label: "Created by", value: `User #${filters.createdById}` });
+  }
+
+  return rows;
+};
+
+const styleSummaryWorksheet = (worksheet: ExcelJS.Worksheet) => {
+  worksheet.columns = [
+    { key: "label", width: 24 },
+    { key: "value", width: 48 },
+  ];
+
+  worksheet.mergeCells("A1:B1");
+  const titleCell = worksheet.getCell("A1");
+  titleCell.value = "Property Export Summary";
+  titleCell.font = { bold: true, size: 14, color: { argb: EXCEL_COLORS.summaryHeading } };
+  titleCell.alignment = { vertical: "middle" };
+
+  const headerRow = worksheet.getRow(3);
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: EXCEL_COLORS.headerText } };
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: EXCEL_COLORS.headerFill },
+    };
+    cell.border = {
+      top: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+      left: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+      bottom: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+      right: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+    };
+  });
+
+  worksheet.eachRow((row, rowNumber) => {
+    if (rowNumber < 4) return;
+
+    row.eachCell((cell) => {
+      cell.alignment = { vertical: "middle", wrapText: true };
+      cell.border = {
+        top: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+        left: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+        bottom: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+        right: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+      };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: EXCEL_COLORS.summaryFill },
+      };
+    });
+  });
+};
+
+const stylePropertiesWorksheet = (worksheet: ExcelJS.Worksheet) => {
+  const headerRow = worksheet.getRow(1);
+
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: EXCEL_COLORS.headerText } };
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: EXCEL_COLORS.headerFill },
+    };
+    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    cell.border = {
+      top: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+      left: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+      bottom: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+      right: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+    };
+  });
+
+  worksheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return;
+
+    row.eachCell((cell) => {
+      cell.alignment = { vertical: "middle", wrapText: true };
+      cell.border = {
+        top: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+        left: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+        bottom: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+        right: { style: "thin", color: { argb: EXCEL_COLORS.border } },
+      };
+    });
+  });
+
+  worksheet.views = [{ state: "frozen", ySplit: 1 }];
+  worksheet.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: 1, column: worksheet.columnCount },
+  };
+};
+
 export const exportPropertiesToExcel = async (
   filters: PropertyExcelExportFilters = {},
 ): Promise<Uint8Array> => {
@@ -206,6 +395,12 @@ export const exportPropertiesToExcel = async (
   if (filters.status) conditions.push({ status: filters.status });
   if (filters.propertyTypeId) {
     conditions.push({ propertyTypeId: filters.propertyTypeId });
+  }
+  if (!filters.includeValuated) {
+    conditions.push({
+      propertyValuation: { none: {} },
+      propertyIndicativeValuations: { none: {} },
+    });
   }
   if (filters.search?.trim()) {
     conditions.push({
@@ -317,6 +512,13 @@ export const exportPropertiesToExcel = async (
       propertyLocation: true,
       propertyPhotos: true,
       titleDocument: true,
+      createdByUser: {
+        select: {
+          username: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
       transaction: {
         orderBy: { transactionDate: "desc" },
         take: 1,
@@ -334,23 +536,30 @@ export const exportPropertiesToExcel = async (
     { header: "propertyTypeName", key: "propertyTypeName", width: 20 },
     { header: "status", key: "status", width: 14 },
     { header: "workflowStatus", key: "workflowStatus", width: 18 },
+    { header: "createdAt", key: "createdAt", width: 22, style: { numFmt: "yyyy-mm-dd hh:mm" } },
+    { header: "createdByUsername", key: "createdByUsername", width: 20 },
+    { header: "createdByName", key: "createdByName", width: 24 },
     { header: "provinceNameEn", key: "provinceNameEn", width: 20 },
     { header: "districtNameEn", key: "districtNameEn", width: 20 },
     { header: "communeNameEn", key: "communeNameEn", width: 20 },
     { header: "villageNameEn", key: "villageNameEn", width: 20 },
     { header: "titleDeedType", key: "titleDeedType", width: 16 },
     { header: "titleDeedNo", key: "titleDeedNo", width: 18 },
-    { header: "totalSizeByTitleDeed", key: "totalSizeByTitleDeed", width: 20 },
-    { header: "latitude", key: "latitude", width: 14 },
-    { header: "longitude", key: "longitude", width: 14 },
+    { header: "totalSizeByTitleDeed", key: "totalSizeByTitleDeed", width: 20, style: { numFmt: "#,##0.00" } },
+    { header: "latitude", key: "latitude", width: 14, style: { numFmt: "0.000000" } },
+    { header: "longitude", key: "longitude", width: 14, style: { numFmt: "0.000000" } },
     { header: "transactionType", key: "transactionType", width: 18 },
-    { header: "transactionDate", key: "transactionDate", width: 18 },
-    { header: "totalPrice", key: "totalPrice", width: 16 },
+    { header: "transactionDate", key: "transactionDate", width: 18, style: { numFmt: "yyyy-mm-dd" } },
+    { header: "totalPrice", key: "totalPrice", width: 16, style: { numFmt: "#,##0.00" } },
   ];
 
   for (const property of properties) {
     const latestTransaction = property.transaction[0];
     const titleDoc = property.titleDocument;
+    const creatorName = [property.createdByUser?.firstName, property.createdByUser?.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
 
     worksheet.addRow({
       propertyId: property.propertyId,
@@ -359,6 +568,9 @@ export const exportPropertiesToExcel = async (
       propertyTypeName: property.propertyType.propertyName,
       status: property.status,
       workflowStatus: property.workflowStatus,
+      createdAt: property.createdAt,
+      createdByUsername: property.createdByUser?.username ?? "",
+      createdByName: creatorName || property.createdByUser?.username || "",
       provinceNameEn: property.propertyAddress?.province?.nameEn ?? "",
       districtNameEn: property.propertyAddress?.district?.nameEn ?? "",
       communeNameEn: property.propertyAddress?.commune?.nameEn ?? "",
@@ -389,8 +601,17 @@ export const exportPropertiesToExcel = async (
     });
   }
 
-  const headerRow = worksheet.getRow(1);
-  headerRow.font = { bold: true };
+  stylePropertiesWorksheet(worksheet);
+
+  const summarySheet = workbook.addWorksheet("summary");
+  summarySheet.addRow([]);
+  summarySheet.addRow([]);
+  summarySheet.addRow(["Filter", "Value"]);
+  const summaryRows = await buildExportSummaryRows(filters, properties.length);
+  summaryRows.forEach((row) => {
+    summarySheet.addRow([row.label, row.value]);
+  });
+  styleSummaryWorksheet(summarySheet);
 
   const buffer = await workbook.xlsx.writeBuffer();
   return buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);

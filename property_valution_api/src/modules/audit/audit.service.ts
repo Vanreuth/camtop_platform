@@ -115,9 +115,16 @@ export class AuditService {
 
   async getUserAuditLogs(
     userId: number,
+    filters: AuditFilters = {},
     pagination: AuditPaginationOptions = {}
   ): Promise<AuditLogResult> {
-    return this.getAuditLogs({ userId }, pagination);
+    return this.getAuditLogs(
+      {
+        ...filters,
+        userId,
+      },
+      pagination
+    );
   }
 
   async getAuditSummary(
