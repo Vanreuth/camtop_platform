@@ -211,6 +211,24 @@ const formatDate = (value?: string | null) => {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
 
+const buildPropertyExportParams = (params: ApiParams | null) => {
+  if (!params) return undefined;
+
+  return Object.fromEntries(
+    Object.entries(params).filter(
+      ([key, value]) =>
+        key !== "page" &&
+        key !== "limit" &&
+        key !== "sortBy" &&
+        key !== "sortOrder" &&
+        key !== "valuerScope" &&
+        value !== undefined &&
+        value !== null &&
+        value !== "",
+    ),
+  );
+};
+
 // -----------------------------
 // Main Page
 // -----------------------------
@@ -507,28 +525,22 @@ export default function PropertiesPage() {
       return;
     }
 
-    const exportParams = latestTableParamsRef.current
-      ? Object.fromEntries(
-          Object.entries(latestTableParamsRef.current).filter(
-            ([key]) =>
-              key !== "page" &&
-              key !== "limit" &&
-              key !== "sortBy" &&
-              key !== "sortOrder",
-          ),
-        )
-      : undefined;
+    const exportParams = buildPropertyExportParams(latestTableParamsRef.current);
 
-    const { blob, fileName } = await exportExcelMutation.mutateAsync(exportParams);
-    const url = window.URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = fileName || "properties-export.xlsx";
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    window.URL.revokeObjectURL(url);
-    toast.success("Property Excel exported successfully");
+    try {
+      const { blob, fileName } = await exportExcelMutation.mutateAsync(exportParams);
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName || "properties-export.xlsx";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success("Property Excel exported successfully");
+    } catch {
+      // handled in the mutation hook
+    }
   }, [canSeeImportExport, exportExcelMutation, tc]);
 
   const handleTableParamsChange = useCallback((params: ApiParams) => {

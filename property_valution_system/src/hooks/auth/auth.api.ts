@@ -163,7 +163,12 @@ export const authApi = {
     userId: number,
     passwordData: ChangePasswordInput
   ): Promise<void> => {
-    const { data } = await api.patch(`/auth/${userId}/password`, passwordData);
+    const { data } = await api.patch(`/auth/${userId}/password`, {
+      currentPassword: passwordData.currentPassword,
+      newPassword: passwordData.newPassword,
+      confirmPassword: passwordData.confirmPassword,
+      confirmNewPassword: passwordData.confirmPassword,
+    });
     return data;
   },
 

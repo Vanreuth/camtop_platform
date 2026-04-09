@@ -7,6 +7,18 @@ import { successResponse } from "../../common/utils/responseHelper";
 
 const service = new UserService();
 
+const toNumber = (value: unknown): number | undefined => {
+	if (typeof value !== "string" || value.trim() === "") return undefined;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const toDate = (value: unknown): Date | undefined => {
+	if (typeof value !== "string" || value.trim() === "") return undefined;
+	const parsed = new Date(value);
+	return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
+
 export class UserController {
 	private static buildUserResponse(user: any) {
 		return {
@@ -179,8 +191,16 @@ export class UserController {
 
 		const page = Math.max(1, Number(req.query.page) || 1);
 		const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+		const filters = {
+			action: typeof req.query.action === "string" ? req.query.action : undefined,
+			entity: typeof req.query.entity === "string" ? req.query.entity : undefined,
+			entityId: toNumber(req.query.entityId),
+			ipAddress: typeof req.query.ipAddress === "string" ? req.query.ipAddress : undefined,
+			dateFrom: toDate(req.query.dateFrom),
+			dateTo: toDate(req.query.dateTo),
+		};
 
-		const data = await service.getAuditLogs(userId, { page, limit });
+		const data = await service.getAuditLogs(userId, filters, { page, limit });
 
 		return successResponse(
 			res,

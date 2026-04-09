@@ -32,8 +32,11 @@ const createAuditLog = async (
 export const AuditService = {
   getAuditLogs: (filters: SearchFilters = {}, pagination: PaginationOptions = {}) =>
     service.getAuditLogs(filters, pagination),
-  getUserAuditLogs: (userId: number, pagination: PaginationOptions = {}) =>
-    service.getUserAuditLogs(userId, pagination),
+  getUserAuditLogs: (
+    userId: number,
+    filters: SearchFilters = {},
+    pagination: PaginationOptions = {}
+  ) => service.getUserAuditLogs(userId, filters, pagination),
   getAuditSummary: (userId?: number, days?: number) =>
     service.getAuditSummary(userId, days),
   createAuditLog,

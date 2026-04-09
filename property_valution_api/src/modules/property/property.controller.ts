@@ -62,10 +62,23 @@ export class PropertyController {
 		};
 		const parseString = (value: unknown) =>
 			typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+		const parseBoolean = (value: unknown, field: string) => {
+			if (value === undefined) return undefined;
+			if (typeof value !== "string") {
+				throw new BadRequestError(`${field} must be true or false`);
+			}
+
+			const normalized = value.trim().toLowerCase();
+			if (normalized === "true") return true;
+			if (normalized === "false") return false;
+
+			throw new BadRequestError(`${field} must be true or false`);
+		};
 
 		const statusRaw = typeof req.query.status === "string" ? req.query.status : undefined;
 		const workflowStatusRaw =
 			typeof req.query.workflowStatus === "string" ? req.query.workflowStatus : undefined;
+		const includeValuated = parseBoolean(req.query.includeValuated, "includeValuated");
 		const search = parseString(req.query.search);
 		const provinceId = parseString(req.query.provinceId);
 		const districtId = parseString(req.query.districtId);
@@ -123,6 +136,7 @@ export class PropertyController {
 			status: normalizedStatus as PropertyStatus | undefined,
 			workflowStatus: normalizedWorkflowStatus as WorkflowStatus | undefined,
 			propertyTypeId: propertyTypeIdRaw,
+			includeValuated,
 			provinceId,
 			districtId,
 			communeId,

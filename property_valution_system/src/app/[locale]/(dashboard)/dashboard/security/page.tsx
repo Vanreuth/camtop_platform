@@ -46,6 +46,24 @@ type SecurityEvent = {
   icon: LucideIcon;
 };
 
+type LoginAuditEvent = {
+  id: number;
+  type: string;
+  status: SecurityEventStatus;
+  icon: LucideIcon;
+  relativeTime: string;
+  absoluteTime: string;
+  ip: string;
+  device: string;
+  browser: string;
+  userDisplayName: string;
+  username?: string;
+  email?: string;
+  userId?: number;
+  identifier?: string;
+  reason?: string;
+};
+
 type LoginSession = {
   id: string;
   userDisplayName: string;
@@ -104,11 +122,32 @@ const formatRelativeTime = (
   return relativeTimeFormat.format(Math.round(diffMs / 1_000), "second");
 };
 
+const formatAbsoluteTime = (
+  dateValue: string | undefined,
+  locale: string,
+  unknownTimeLabel: string,
+) => {
+  if (!dateValue) return unknownTimeLabel;
+
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return unknownTimeLabel;
+
+  return new Intl.DateTimeFormat(locale === "kh" ? "km-KH" : "en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+};
+
 const humanizeAction = (action: string) =>
   action
     .replace(/[_-]+/g, " ")
     .toLowerCase()
     .replace(/\b\w/g, (c) => c.toUpperCase());
+
+const normalizeAuditActionLabel = (action: string) =>
+  humanizeAction(action.replace(/^auth[_-]?/i, ""));
+
+const isLoginAuditAction = (action: string) => /login/i.test(action);
 
 const actionToStatus = (action: string): SecurityEventStatus => {
   const normalized = action.toLowerCase();
@@ -251,6 +290,70 @@ const buildSessions = (
   return Array.from(sessions.values());
 };
 
+const buildLoginAuditEvents = (
+  logs: AuditLog[],
+  locale: string,
+  relativeTimeFormat: Intl.RelativeTimeFormat,
+  unknownTimeLabel: string,
+  unknownIpLabel: string,
+  userNumberLabel: (id: number) => string,
+  unknownUserLabel: string,
+  deviceLabels: Parameters<typeof inferDeviceName>[1],
+  browserLabels: Parameters<typeof inferBrowserName>[1],
+): LoginAuditEvent[] => {
+  return [...logs]
+    .filter((log) => isLoginAuditAction(log.action))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .map((log) => {
+      const details = parseDetails(log.details);
+      const status = actionToStatus(log.action);
+      const userAgent =
+        (typeof details?.userAgent === "string" ? details.userAgent : undefined) ??
+        log.userAgent;
+      const ip =
+        (typeof details?.ip === "string" ? details.ip : undefined) ??
+        log.ipAddress ??
+        unknownIpLabel;
+      const identifier =
+        (typeof details?.identifier === "string" ? details.identifier : undefined) ??
+        log.user?.username ??
+        log.user?.email;
+      const reason =
+        typeof details?.reason === "string"
+          ? humanizeAction(details.reason)
+          : typeof details?.message === "string"
+            ? details.message
+            : undefined;
+      const fullName = [log.user?.firstName, log.user?.lastName]
+        .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+        .join(" ");
+      const userId = log.user?.id ?? log.userId;
+      const userDisplayName =
+        fullName ||
+        log.user?.username ||
+        identifier ||
+        (userId ? userNumberLabel(userId) : unknownUserLabel);
+
+      return {
+        id: log.id,
+        type: normalizeAuditActionLabel(log.action),
+        status,
+        icon: actionToIcon(log.action, status),
+        relativeTime: formatRelativeTime(log.createdAt, relativeTimeFormat, unknownTimeLabel),
+        absoluteTime: formatAbsoluteTime(log.createdAt, locale, unknownTimeLabel),
+        ip,
+        device: inferDeviceName(userAgent, deviceLabels),
+        browser: inferBrowserName(userAgent, browserLabels),
+        userDisplayName,
+        username: log.user?.username,
+        email: log.user?.email,
+        userId,
+        identifier,
+        reason,
+      };
+    });
+};
+
 export default function SecurityPage() {
   const locale = useLocale();
   const t = useTranslations("securityPage");
@@ -314,13 +417,37 @@ export default function SecurityPage() {
     isAdmin
   );
 
+  const adminLoginLogsQuery = useAuditLogs(
+    {
+      action: "LOGIN",
+    },
+    {
+      page: 1,
+      limit: 12,
+    },
+    isAdmin
+  );
+
   const userLogsQuery = useUserAuditLogs(
     userId,
+    {},
     {
       page: 1,
       limit: 25,
     },
-    !!userId
+    !!userId && !isAdmin
+  );
+
+  const userLoginLogsQuery = useUserAuditLogs(
+    userId,
+    {
+      action: "LOGIN",
+    },
+    {
+      page: 1,
+      limit: 12,
+    },
+    !!userId && !isAdmin
   );
 
   const summaryQuery = useAuditSummary(
@@ -336,8 +463,8 @@ export default function SecurityPage() {
     mutationFn: (period: CleanupPeriod) => auditApi.cleanupAuditLogs({ period }),
     onSuccess: (result) => {
       toast.success(result.message ?? t("cleanupSuccess"));
-      void allLogsQuery.refetch();
-      void userLogsQuery.refetch();
+      void logsQuery.refetch();
+      void loginLogsQuery.refetch();
       if (isAdmin) {
         void summaryQuery.refetch();
       }
@@ -351,39 +478,50 @@ export default function SecurityPage() {
   });
 
   const logsQuery = isAdmin ? allLogsQuery : userLogsQuery;
+  const loginLogsQuery = isAdmin ? adminLoginLogsQuery : userLoginLogsQuery;
   const logs = useMemo(() => logsQuery.data?.logs ?? [], [logsQuery.data?.logs]);
+  const loginLogs = useMemo(
+    () => loginLogsQuery.data?.logs ?? [],
+    [loginLogsQuery.data?.logs]
+  );
   const summary = isAdmin ? summaryQuery.data?.summary : undefined;
   const isLoading =
     isAuthLoading ||
     logsQuery.isLoading ||
+    loginLogsQuery.isLoading ||
     (isAdmin && summaryQuery.isLoading) ||
     cleanupMutation.isPending;
   const hasError =
     logsQuery.isError ||
+    loginLogsQuery.isError ||
     (isAdmin && summaryQuery.isError);
 
   const securityEvents = useMemo<SecurityEvent[]>(() => {
-    return logs.slice(0, 6).map((log) => {
-      const status = actionToStatus(log.action);
-      return {
-        id: log.id,
-        type: humanizeAction(log.action),
-        description: buildEventDescription(
-          log,
-          t("accountActivity"),
-          (entity, ip) => t("activityFromIp", { entity, ip })
-        ),
-        time: formatRelativeTime(log.createdAt, relativeTimeFormat, t("unknownTime")),
-        status,
-        icon: actionToIcon(log.action, status),
-      };
-    });
+    return logs
+      .filter((log) => !isLoginAuditAction(log.action))
+      .slice(0, 6)
+      .map((log) => {
+        const status = actionToStatus(log.action);
+        return {
+          id: log.id,
+          type: humanizeAction(log.action),
+          description: buildEventDescription(
+            log,
+            t("accountActivity"),
+            (entity, ip) => t("activityFromIp", { entity, ip })
+          ),
+          time: formatRelativeTime(log.createdAt, relativeTimeFormat, t("unknownTime")),
+          status,
+          icon: actionToIcon(log.action, status),
+        };
+      });
   }, [logs, relativeTimeFormat, t]);
 
-  const loginSessions = useMemo(
+  const loginAuditEvents = useMemo(
     () =>
-      buildSessions(
-        logs,
+      buildLoginAuditEvents(
+        loginLogs,
+        locale,
         relativeTimeFormat,
         t("unknownTime"),
         t("unknownIp"),
@@ -392,7 +530,22 @@ export default function SecurityPage() {
         deviceLabels,
         browserLabels
       ),
-    [browserLabels, deviceLabels, logs, relativeTimeFormat, t]
+    [browserLabels, deviceLabels, locale, loginLogs, relativeTimeFormat, t]
+  );
+
+  const loginSessions = useMemo(
+    () =>
+      buildSessions(
+        loginLogs,
+        relativeTimeFormat,
+        t("unknownTime"),
+        t("unknownIp"),
+        (id) => t("userNumber", { id }),
+        t("unknownUser"),
+        deviceLabels,
+        browserLabels
+      ),
+    [browserLabels, deviceLabels, loginLogs, relativeTimeFormat, t]
   );
 
   const failedActionCount = useMemo(() => {
@@ -404,10 +557,8 @@ export default function SecurityPage() {
   }, [summary?.actionSummary]);
 
   const loginActionCount = useMemo(() => {
-    return (summary?.actionSummary ?? []).reduce((count, action) => {
-      return /login/i.test(action.action) ? count + action.count : count;
-    }, 0);
-  }, [summary?.actionSummary]);
+    return loginLogsQuery.data?.pagination.total ?? loginAuditEvents.length;
+  }, [loginAuditEvents.length, loginLogsQuery.data?.pagination.total]);
 
   const totalEvents = logsQuery.data?.pagination.total ?? logs.length;
   const lastActivity = logs[0];
@@ -662,6 +813,85 @@ export default function SecurityPage() {
             </CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>{isAdmin ? t("loginActivityTitle") : t("loginActivityOwnTitle")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {t("loadingLoginActivity")}
+              </div>
+            ) : loginAuditEvents.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("noLoginActivity")}</p>
+            ) : (
+              <div className="space-y-4">
+                {loginAuditEvents.map((event) => {
+                  const Icon = event.icon;
+                  return (
+                    <div
+                      key={event.id}
+                      className="flex flex-col gap-3 rounded-lg border p-4 md:flex-row md:items-start md:justify-between"
+                    >
+                      <div className="flex gap-3">
+                        <div className="rounded-full border bg-muted/40 p-2">
+                          <Icon
+                            className={cn(
+                              "h-4 w-4",
+                              event.status === "success"
+                                ? "text-green-600"
+                                : event.status === "warning"
+                                  ? "text-yellow-600"
+                                  : "text-blue-600"
+                            )}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-medium text-sm">{event.type}</p>
+                            <Badge variant={event.status} className="text-xs">
+                              {t(`statusLabels.${event.status}`)}
+                            </Badge>
+                          </div>
+                          <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap">
+                            <span>{event.userDisplayName}</span>
+                            {event.username && <span>@{event.username}</span>}
+                            {event.email && <span>{event.email}</span>}
+                            {typeof event.userId === "number" && (
+                              <span>{t("userIdLabel", { id: event.userId })}</span>
+                            )}
+                          </div>
+                          {event.identifier && event.identifier !== event.username && (
+                            <p className="text-xs text-muted-foreground">
+                              {t("identifierLabel", { value: event.identifier })}
+                            </p>
+                          )}
+                          {event.reason && (
+                            <p className="text-xs text-amber-700 dark:text-amber-400">
+                              {t("reasonLabel", { value: event.reason })}
+                            </p>
+                          )}
+                          <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
+                            <span>
+                              {event.device} ({event.browser})
+                            </span>
+                            <span>{t("ipLabel", { ip: event.ip })}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-xs text-muted-foreground md:text-right">
+                        <p>{event.relativeTime}</p>
+                        <p>{event.absoluteTime}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

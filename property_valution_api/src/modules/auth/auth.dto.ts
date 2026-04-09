@@ -43,12 +43,47 @@ export const changePasswordShema = z
   .object({
     currentPassword: passwordSchema,
     newPassword: passwordSchema,
-    confirmNewPassword: passwordSchema,
+    confirmPassword: passwordSchema.optional(),
+    confirmNewPassword: passwordSchema.optional(),
   })
-  .refine((data) => data.newPassword === data.confirmNewPassword, {
-    message: "New passwords do not match",
-    path: ["confirmNewPassword"],
-  });
+  .superRefine((data, ctx) => {
+    const confirmPassword = data.confirmPassword ?? data.confirmNewPassword;
+
+    if (!confirmPassword) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Confirm password is required",
+        path: ["confirmPassword"],
+      });
+      return;
+    }
+
+    if (
+      data.confirmPassword &&
+      data.confirmNewPassword &&
+      data.confirmPassword !== data.confirmNewPassword
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Confirm password fields do not match",
+        path: ["confirmPassword"],
+      });
+      return;
+    }
+
+    if (data.newPassword !== confirmPassword) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "New passwords do not match",
+        path: [data.confirmPassword ? "confirmPassword" : "confirmNewPassword"],
+      });
+    }
+  })
+  .transform((data) => ({
+    currentPassword: data.currentPassword,
+    newPassword: data.newPassword,
+    confirmPassword: data.confirmPassword ?? data.confirmNewPassword!,
+  }));
 
 export const updateProfileSchema = z.object({
   email: emailSchema.optional(),

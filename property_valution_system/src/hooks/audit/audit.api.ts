@@ -168,11 +168,12 @@ export const auditApi = {
 
   getUserAuditLogs: async (
     userId: number,
+    filters: SearchFilters = {},
     pagination: PaginationOptions = {}
   ): Promise<AuditLogResult> => {
     try {
-      const params = cleanParams({ ...pagination });
-      const response = await api.get(`/audit/logs/${userId}`, { params });
+      const params = cleanParams({ ...filters, ...pagination });
+      const response = await api.get(`/users/${userId}/audit-logs`, { params });
       const payload = unwrap<unknown>(response.data);
 
       return {
@@ -183,7 +184,20 @@ export const auditApi = {
     } catch (error) {
       if (!shouldTryLegacyRoute(extractStatusCode(error))) throw error;
       // Backward compatibility: older API expects userId as query param.
-      return auditApi.getAuditLogs({ userId }, pagination);
+      try {
+        const params = cleanParams({ ...pagination });
+        const response = await api.get(`/audit/logs/${userId}`, { params });
+        const payload = unwrap<unknown>(response.data);
+
+        return {
+          logs: extractLogs(payload),
+          pagination: extractPagination(response.data, pagination),
+          message: extractMessage(response.data),
+        };
+      } catch (legacyError) {
+        if (!shouldTryLegacyRoute(extractStatusCode(legacyError))) throw legacyError;
+        return auditApi.getAuditLogs({ ...filters, userId }, pagination);
+      }
     }
   },
 
