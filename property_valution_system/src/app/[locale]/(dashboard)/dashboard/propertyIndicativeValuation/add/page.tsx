@@ -239,6 +239,15 @@ const renderRequiredLabel = (label: string) => (
   </>
 );
 
+const isValuerRoleLike = (role?: { roleCode?: string | null; roleName?: string | null } | null) => {
+  if (!role) return false;
+
+  const roleCode = role.roleCode?.trim().toUpperCase() ?? "";
+  const roleName = role.roleName?.trim().toUpperCase() ?? "";
+
+  return roleCode === "VALUER" || roleName.includes("VALUER");
+};
+
 const buildPropertyAddressInput = (property: NewPropertyDraft) => {
   if (!property.provinceId || !property.districtId || !property.communeId) return undefined;
 
@@ -373,10 +382,12 @@ export default function AddPropertyIndicativeValuationPage() {
   const tp = useTranslations("properties");
   const router = useRouter();
   const propertyTypes = usePropertyTypes();
-  const { user, hasHierarchyLevel } = useAuth();
+  const { user, hasHierarchyLevel, highestRole } = useAuth();
   const createMutation = useCreateIndicativeValuation();
-  const canAssignValuer = hasHierarchyLevel(2);
-  const canSelectStatus = hasHierarchyLevel(2);
+  const canManageIndicativeWorkflow =
+    hasHierarchyLevel(2) && !isValuerRoleLike(highestRole);
+  const canAssignValuer = canManageIndicativeWorkflow;
+  const canSelectStatus = canManageIndicativeWorkflow;
 
   const [activeTab, setActiveTab] = useState<TabKey>("introduction");
   const [components, setComponents] = useState<ComponentDraft[]>([
@@ -1365,12 +1376,8 @@ export default function AddPropertyIndicativeValuationPage() {
 
     const payload = {
       currency: "USD",
-      ...(canSelectStatus
-        ? {
-            status: values.status,
-            workflowStatus: values.workflowStatus,
-          }
-        : {}),
+      status: values.status ?? "ACTIVE",
+      workflowStatus: values.workflowStatus ?? "DRAFT",
       instructedBy: normalizeOptionalText(values.instructedBy),
       contactName: normalizeOptionalText(values.contactName),
       contactTel: normalizeOptionalText(values.contactTel),

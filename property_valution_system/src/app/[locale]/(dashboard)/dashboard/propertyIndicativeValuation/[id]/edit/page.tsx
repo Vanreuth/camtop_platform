@@ -280,6 +280,15 @@ const renderRequiredLabel = (label: string) => (
   </>
 );
 
+const isValuerRoleLike = (role?: { roleCode?: string | null; roleName?: string | null } | null) => {
+  if (!role) return false;
+
+  const roleCode = role.roleCode?.trim().toUpperCase() ?? "";
+  const roleName = role.roleName?.trim().toUpperCase() ?? "";
+
+  return roleCode === "VALUER" || roleName.includes("VALUER");
+};
+
 const buildPropertyAddressInput = (property: NewPropertyDraft) => {
   if (!property.provinceId || !property.districtId || !property.communeId) return undefined;
 
@@ -513,14 +522,16 @@ export default function EditPropertyIndicativeValuationPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const propertyTypes = usePropertyTypes();
-  const { user, hasHierarchyLevel } = useAuth();
+  const { user, hasHierarchyLevel, highestRole } = useAuth();
   const updateMutation = useUpdateIndicativeValuation();
   const { data: valuation, isLoading, isError } = useIndicativeValuation(
     valuationId,
     Number.isFinite(valuationId),
   );
-  const canAssignValuer = hasHierarchyLevel(2);
-  const canSelectStatus = hasHierarchyLevel(2);
+  const canManageIndicativeWorkflow =
+    hasHierarchyLevel(2) && !isValuerRoleLike(highestRole);
+  const canAssignValuer = canManageIndicativeWorkflow;
+  const canSelectStatus = canManageIndicativeWorkflow;
 
   const [activeTab, setActiveTab] = useState<TabKey>("introduction");
   const [components, setComponents] = useState<ComponentDraft[]>([
@@ -1687,8 +1698,8 @@ export default function EditPropertyIndicativeValuationPage() {
         ...(hasPhotoFieldUpdates ? { propertyPhotos: propertyPhotoUpdates } : {}),
       },
       currency: "USD" as any,
-      status: values.status as any,
-      workflowStatus: values.workflowStatus as any,
+      status: (values.status ?? valuation?.status ?? "ACTIVE") as any,
+      workflowStatus: (values.workflowStatus ?? valuation?.workflowStatus ?? "APPROVED") as any,
       instructedBy: normalizeOptionalText(values.instructedBy),
       contactName: normalizeOptionalText(values.contactName),
       contactTel: normalizeOptionalText(values.contactTel),
